@@ -558,6 +558,22 @@ class Layout:
     """
     GAP_Y, GAP_X = 46.0, 60.0
     LONG = 3                                   # une liaison « longue » saute au moins 3 rangs
+    FRAME_GAP = 26.0                           # place en plus par cadre qui s'ouvre ou se ferme
+
+    def frame_keys(self, n):
+        """Cadres susceptibles d'entourer n : modules dépliés qui le contiennent, listes nommées."""
+        g, keys = self.g, set()
+        p = g.nodes[n].parent
+        while p is not None:
+            keys.add(p)
+            p = g.group_parent.get(p)
+        base = n.split("#")[0]
+        for q in getattr(g, "containers", {}):
+            if base.startswith(q + "."):
+                keys.add("list:" + q)
+        if g.nodes[n].repeat > 1:
+            keys.add("rep:" + n)
+        return keys
 
     def __init__(self, g, sizes):
         self.g, self.sizes = g, sizes
@@ -696,10 +712,17 @@ class Layout:
         shift = lane_x[0]
         for n in self.ids:
             x[n] = lane_x[lane_of[n]] - shift
-        # ordonnées : une ligne par valeur de row
+        # ordonnées : une ligne par valeur de row ; entre deux lignes, de la place en plus pour
+        # chaque cadre (module déplié, liste de modules) qui se ferme ou s'ouvre entre elles
         y, top = {}, 0.0
-        for rv in sorted(set(row.values())):
+        rows = sorted(set(row.values()))
+        prev_keys = None
+        for rv in rows:
             members = [n for n in self.ids if row[n] == rv]
+            keys = set().union(*(self.frame_keys(n) for n in members))
+            if prev_keys is not None:
+                top += self.FRAME_GAP * len(keys ^ prev_keys)
+            prev_keys = keys
             h = max(self.sizes[n][1] for n in members)
             for n in members:
                 y[n] = top + h / 2
@@ -916,8 +939,13 @@ def build(g, title, shapes):
             st = "auto"                           # attaches décalées : la flèche ne serait plus droite
         arrows.append({"from": frm, "to": to, **({"style": st} if st else {})})
     top = min(y[n] - sizes[n][1] / 2 for n in lay.ids)
-    bbox = (min(x[n] - sizes[n][0] / 2 for n in lay.ids) - 30, top - 60,
-            max(x[n] + sizes[n][0] / 2 for n in lay.ids) + 30, max(y[n] + sizes[n][1] / 2 for n in lay.ids))
+    from deepgraph.config import CFG as _C
+    from PyQt5.QtGui import QFontMetricsF
+    tw = QFontMetricsF(_C.font(16, True)).horizontalAdvance(title)
+    cx = (min(x.values()) + max(x.values())) / 2
+    bbox = (min(min(x[n] - sizes[n][0] / 2 for n in lay.ids) - 30, cx - tw / 2 - 10), top - 60,
+            max(max(x[n] + sizes[n][0] / 2 for n in lay.ids) + 30, cx + tw / 2 + 10),
+            max(y[n] + sizes[n][1] / 2 for n in lay.ids))
     nodes.append({"id": "titre", "type": "text", "text": title, "bold": True, "font_size": 16,
                   "cx": round((min(x.values()) + max(x.values())) / 2, 1), "cy": round(top - 40, 1)})
     return {"format": "deepgraph", "settings": {"fit_text": True}, "nodes": nodes, "arrows": arrows}, bbox
@@ -993,12 +1021,16 @@ def load_class(spec):
     if path.endswith(".py") or os.path.sep in path:
         path = os.path.abspath(path)
         sys.path.insert(0, os.path.dirname(path))
+        # le dossier courant (racine du projet) d'abord : « from models.x import … » doit marcher
+        # comme quand on lance son propre code depuis la racine du projet
+        sys.path.insert(0, os.getcwd())
         modname = "_deepgraph_modele_" + os.path.splitext(os.path.basename(path))[0]
         sp = importlib.util.spec_from_file_location(modname, path)
         mod = importlib.util.module_from_spec(sp)
         sys.modules[modname] = mod
         sp.loader.exec_module(mod)
     else:
+        sys.path.insert(0, os.getcwd())
         mod = importlib.import_module(path)
     return getattr(mod, name)
 
