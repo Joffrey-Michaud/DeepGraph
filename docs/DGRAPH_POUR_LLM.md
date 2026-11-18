@@ -19,6 +19,8 @@ les cadres des groupes et les côtés des flèches.
 - Avant le JSON, deux ou trois phrases maximum : ce que montre le schéma et les simplifications faites.
 - L'utilisateur l'ouvre avec **Fichier > Ouvrir**. Un fichier mal formé affiche un message
   d'erreur précis (ex. « flèche n° 4 : élément « enc3 » introuvable ») : corrige alors le JSON.
+- Il peut aussi l'exporter directement, sans l'éditeur, en PDF / SVG (vectoriels) et PNG :
+  `python outils/exporter.py nom_du_modele.dgraph`.
 
 ## 2. Structure du fichier
 
@@ -31,6 +33,21 @@ les cadres des groupes et les côtés des flèches.
 ```
 
 `"format": "deepgraph"` est **obligatoire**. Tout le reste est facultatif.
+
+Réglages globaux (facultatifs), à côté de `nodes` et `arrows` :
+
+```json
+"settings": {"font": "TeX Gyre Termes", "border_width": 1.6, "arrow_width": 1.6}
+```
+
+| clé | défaut | rôle |
+|---|---|---|
+| `font` | police de `blocks.yaml` (Helvetica ou équivalent) | police de tout le diagramme (nom de famille installée) |
+| `border_width` | 1.6 | épaisseur des bords des blocs |
+| `arrow_width` | 1.6 | épaisseur des flèches |
+
+Ne les mets que si l'utilisateur demande une police ou des épaisseurs particulières (par exemple
+une police à empattements pour suivre le texte d'un article).
 
 ### Repère
 - Unités : pixels. **x vers la droite, y vers le bas** (y = 100 est sous y = 0).

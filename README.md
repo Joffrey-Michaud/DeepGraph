@@ -7,6 +7,11 @@ pip install -r requirements.txt     # PyQt5 + PyYAML
 python main.py                      # ou : python main.py mon_schema.dgraph
 ```
 
+> **Modifier DeepGraph : une branche par modification, jamais de push sur `main`.** Chaque
+> modification se fait dans une branche nommée `<type>/<sujet>` (ex. `fix/police-italique`,
+> `feat/export-cli`) puis passe par une pull request ; l'administrateur décide de la fusionner.
+> Règles complètes : [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Utilisation
 
 | Action | Comment |
@@ -28,7 +33,7 @@ python main.py                      # ou : python main.py mon_schema.dgraph
 | Menu d'un calque | clic droit : nouveau calque / groupe, dupliquer, copier / couper / coller le contenu, sélectionner le contenu, envoyer la sélection ici, grouper / dégrouper, fusionner avec le calque du dessous, masquer, verrouiller, afficher uniquement celui-ci, renommer, supprimer |
 | Groupes de calques | sélectionner plusieurs calques (Ctrl / Maj + clic) puis « Grouper » ; masquer / verrouiller le groupe s'applique à tous ses calques, les opacités se multiplient |
 | Modèles types | **Fichier > Modèles types** : LeNet-5, AlexNet, VGG-16, Inception, ResNet-18, U-Net, Transformer, attention (fig. 2 de Vaswani et al.), ViT, VAE, GAN, MLP, seq2seq. Le modèle s'ouvre comme un nouveau document sans titre (jamais écrasé). Tout `.dgraph` déposé dans [modeles/](modeles/) apparaît aussi dans le menu ; `python outils/generer_modeles.py` régénère les modèles fournis |
-| Exporter | **Ctrl+E** → PDF / SVG / PNG ; **Ctrl+Maj+E** pour la sélection seule |
+| Exporter | **Ctrl+E** → PDF / SVG / PNG ; **Ctrl+Maj+E** pour la sélection seule ; sans l'éditeur : `python outils/exporter.py` (voir plus bas) |
 | Police | barre d'outils « Police » (à côté de Bords / Flèches) : s'applique à tout le diagramme et aux exports, enregistrée dans le `.dgraph` ; « Défaut » = police de `blocks.yaml` ; « Autre police… » pour choisir parmi toutes les polices installées |
 | Épaisseurs | barre d'outils « Bords » / « Flèches » (tout le diagramme) ; par élément dans Propriétés, bouton « Défaut » pour revenir au global |
 | Guides d'alignement | lignes roses pendant un déplacement (bords et centres) ; menu Affichage pour les couper |
@@ -37,6 +42,20 @@ python main.py                      # ou : python main.py mon_schema.dgraph
 | Mode sombre | Affichage > Mode sombre (Ctrl+Maj+D) ; les exports restent sur fond blanc |
 
 Les diagrammes sont enregistrés en `.dgraph` (JSON lisible).
+
+## Exporter en ligne de commande
+
+Même rendu que **Ctrl+E**, sans ouvrir l'éditeur (utile pour régénérer les figures d'un article) :
+
+```bash
+python outils/exporter.py schema.dgraph                      # schema.pdf, .svg et .png à côté
+python outils/exporter.py schema.dgraph -f pdf -o figs/arch  # figs/arch.pdf seulement
+python outils/exporter.py modeles/*.dgraph -f pdf -d /tmp/x  # un PDF par fichier dans /tmp/x
+python outils/exporter.py schema.dgraph --font "TeX Gyre Termes" --scale 6
+```
+
+PDF et SVG sont vectoriels (texte sélectionnable, polices intégrées). `--font` remplace la police du
+diagramme, `--scale` règle la résolution du PNG (4 par défaut), `--transparent` enlève le fond blanc.
 
 ## Générer un schéma avec un LLM
 
@@ -58,3 +77,9 @@ Ce guide est aussi affiché par **Aide > Guide d'utilisation** (F1).
 ```
 
 Le fichier est relu automatiquement à chaque enregistrement.
+
+## Contribuer
+
+Une branche `<type>/<sujet>` par modification, puis une pull request vers `main` ; on ne pousse jamais
+directement sur `main`. Détails, types de branches et vérifications avant de pousser :
+[CONTRIBUTING.md](CONTRIBUTING.md).
