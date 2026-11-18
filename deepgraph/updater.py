@@ -26,6 +26,7 @@ import json
 import os
 import re
 import shutil
+import sys
 import subprocess
 import tarfile
 import tempfile
@@ -258,8 +259,26 @@ def _release_lock():
         pass
 
 
+def preload_modules():
+    """Charge en mémoire tous les modules de DeepGraph avant de remplacer les fichiers.
+
+    Certains modules ne sont importés qu'à l'usage (ouverture d'un fichier, aide…). Sans cela,
+    le processus en cours (export qui continue, fenêtre « Redémarrer plus tard ») importerait
+    les NOUVEAUX fichiers par-dessus l'ancien code déjà chargé, et pourrait planter.
+    Ainsi il reste entièrement sur l'ancienne version ; la nouvelle sert au lancement suivant."""
+    import importlib
+    import pkgutil
+    pkg = sys.modules.get(__package__) or importlib.import_module(__package__)
+    for m in pkgutil.iter_modules(pkg.__path__):
+        try:
+            importlib.import_module(f"{__package__}.{m.name}")
+        except Exception:  # noqa: BLE001  (ex. module graphique sans PyQt complet) : on continue
+            pass
+
+
 def install(release, log=print):
     """Installe la release. Renvoie (succès, message). Ne lève pas d'exception."""
+    preload_modules()
     if not _acquire_lock():
         return False, ("Une autre installation de DeepGraph est en cours (verrou " + LOCK + ") : rien n'a été "
                        "fait ici.")
