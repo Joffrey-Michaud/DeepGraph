@@ -120,6 +120,11 @@ class LibraryPanel(QWidget):
         v.addWidget(self.tree, 1)
         v.addWidget(self.desc)
         v.addLayout(row)
+        from . import __version__
+        self.version_label = QLabel(f"DeepGraph {__version__}")
+        self.version_label.setToolTip("Version installée — Aide > Rechercher des mises à jour")
+        self.version_label.setStyleSheet("color: palette(mid);")
+        v.addWidget(self.version_label)
 
         self.search.textChanged.connect(self.apply_filter)
         self.tree.itemDoubleClicked.connect(self._on_double)

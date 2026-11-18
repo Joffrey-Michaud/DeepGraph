@@ -42,7 +42,10 @@ def route(p1, d1, p2, d2, rects, margin=12.0, bend=None, window=260.0):
     for r in rects:
         if r.right() < lo_x or r.left() > hi_x or r.bottom() < lo_y or r.top() > hi_y:
             continue
-        obs.append((r.left() - margin, r.top() - margin, r.right() + margin, r.bottom() + margin))
+        o = (r.left() - margin, r.top() - margin, r.right() + margin, r.bottom() + margin)
+        if any(o[0] < q[0] < o[2] and o[1] < q[1] < o[3] for q in (s, t)):
+            continue             # extrémité collée à un obstacle : sinon elle serait enfermée
+        obs.append(o)
 
     xs = {s[0], t[0]}
     ys = {s[1], t[1]}

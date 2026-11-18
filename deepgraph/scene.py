@@ -721,6 +721,8 @@ class DiagramScene(LayersMixin, QGraphicsScene):
                     if isinstance(a.dst.node, JunctionItem) and a.head == "end":
                         a.head = "none"
                         a.update_path()
+                    if a.style == "free":       # coudes libres : part du tracé automatique
+                        a.to_free()
                     self.clearSelection()
                     a.setSelected(True)
                 self.checkpoint()

@@ -91,7 +91,7 @@ class MainWindow(QMainWindow):
         self._make_actions()
         self._make_menus()
         self._make_toolbar()
-        self.view.context_actions = [self.a_edit, self._stack_entry, self.a_fit_text, self._bend_menu, None, self.a_copy, self.a_copy_img, self.a_dup, self.a_delete, None,
+        self.view.context_actions = [self._bend_menu, self.a_edit, self._stack_entry, self.a_fit_text, None, self.a_copy, self.a_copy_img, self.a_dup, self.a_delete, None,
                                      self.a_group, self.a_ungroup, self._order_menu, self._layer_menu, None, self.a_export_sel]
 
         self.zoom_label = QLabel("100 %")
@@ -515,30 +515,34 @@ class MainWindow(QMainWindow):
         return [i for i in self.scene.selectedItems() if isinstance(i, BlockItem)]
 
     def _bend_menu(self, parent):
-        """Clic droit sur une flèche : coudes."""
+        """Clic droit sur une flèche : actions sur les coudes, au premier niveau du menu."""
         arrows = [i for i in self.scene.selectedItems() if isinstance(i, ArrowItem)]
         if len(arrows) != 1:
             return None
         a = arrows[0]
         q = getattr(self.scene, "context_pos", None) or a.handle_points().get("src")
-        m = QMenu("Coudes", parent)
 
         def do(fn, *args):
-            if fn(*args):
-                self.scene.checkpoint()
-                self.scene.itemsEdited.emit()
+            fn(*args)
+            self.scene.checkpoint()
+            self.scene.itemsEdited.emit()
 
-        m.addAction("Ajouter un coude ici", lambda: do(a.add_bend, q))
-        rm = m.addAction("Supprimer ce segment", lambda: do(a.remove_bend, q))
-        rm.setEnabled(a.style == "free" and bool(a.bends))
-        m.addSeparator()
-        auto = m.addAction("Tracé automatique (contourne les blocs)",
-                           lambda: (a.set_prop("style", "auto"), self.scene.checkpoint(), self.scene.itemsEdited.emit()))
-        auto.setEnabled(a.style != "auto")
-        fr = m.addAction("Figer le tracé (coudes déplaçables)",
-                         lambda: (a.to_free(), self.scene.checkpoint(), self.scene.itemsEdited.emit()))
-        fr.setEnabled(a.style != "free")
-        return m
+        acts = []
+
+        def act(text, fn, enabled=True, tip=None):
+            x = QAction(text, parent)
+            x.triggered.connect(fn)
+            x.setEnabled(enabled)
+            if tip:
+                x.setStatusTip(tip)
+            acts.append(x)
+
+        act("Ajouter un coude ici (ou double-clic)", lambda: do(a.add_bend, q))
+        act("Supprimer ce segment", lambda: do(a.remove_bend, q), a.style == "free" and len(a.bends) > 1)
+        act("Tracé automatique (contourne les blocs)", lambda: do(a.set_prop, "style", "auto"), a.style != "auto")
+        sep = QAction(parent)
+        sep.setSeparator(True)
+        return acts + [sep]
 
     def _stack_entry(self, parent):
         return self.a_stack if self._selected_blocks() else None

@@ -419,13 +419,18 @@ class ArrowItem(QGraphicsItem):
 
     # coudes libres ---------------------------------------------------------------
     def to_free(self):
-        """Fige le tracé actuel en « coudes libres »."""
-        pts = simplify(self._raw) if self._raw else self.compute_points()
-        if len(pts) == 2 and abs(pts[0].x() - pts[1].x()) > 1e-6 and abs(pts[0].y() - pts[1].y()) > 1e-6:
-            first = self.resolved_first() if self.style != "straight" else axis_of(pts[0], pts[1])
-            bends = []
-        else:
-            first, bends = bends_from_polyline(pts)
+        """Fige le tracé actuel en « coudes libres » (au moins un segment déplaçable).
+        Une flèche droite ou un simple L part du tracé automatique (qui contourne les blocs)."""
+        p1, p2 = self.src.pos(), self.dst.pos()
+        pts = simplify(self._raw) if self._raw else simplify(self.compute_points())
+        if self.style == "straight" or len(pts) <= 3:
+            auto = self.route_auto(p1, p2)
+            if auto is not None and len(simplify(auto)) > len(pts):
+                pts = simplify(auto)
+        first, bends = bends_from_polyline(pts) if len(pts) >= 3 else (self.resolved_first(), [])
+        if not bends:                         # sinon aucun carré bleu : forme en Z, segment du milieu
+            first = self.resolved_first() if self.style != "straight" else axis_of(p1, p2)
+            bends = [round(self.mid_coord(p1, p2, first) - coord(p1, first), 2)]
         self.style, self.first, self.bends, self.mid = "free", first, bends, None
         self.update_path()
 
@@ -471,8 +476,8 @@ class ArrowItem(QGraphicsItem):
 
     def remove_bend(self, q):
         """Supprime le segment intérieur le plus proche de q (les voisins se rejoignent)."""
-        if self.style != "free" or not self.bends:
-            return False
+        if self.style != "free" or len(self.bends) < 2:
+            return False                 # on garde au moins un segment déplaçable
         k = self._nearest_segment(q)
         n = len(self.bends)
         k = max(1, min(n, k))
@@ -617,5 +622,10 @@ class ArrowItem(QGraphicsItem):
         super().mouseReleaseEvent(e)
 
     def mouseDoubleClickEvent(self, e):
-        if self.scene() is not None:
-            self.scene().edit_item(self)
+        """Double-clic sur la flèche : ajoute un coude à cet endroit (segment coupé en deux)."""
+        sc = self.scene()
+        if sc is not None and self.add_bend(e.scenePos()):
+            self.setSelected(True)
+            sc.checkpoint()
+            sc.itemsEdited.emit()
+        e.accept()

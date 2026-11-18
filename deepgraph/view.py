@@ -149,8 +149,10 @@ class DiagramView(QGraphicsView):
 
     def contextMenuEvent(self, e):
         sc = self.scene()
-        if sc.mode != "select" or not self.context_actions:
+        if not self.context_actions:
             return
+        if sc.mode != "select":
+            sc.set_mode("select")          # clic droit en mode flèche : menu de l'élément cliqué
         sc.context_pos = self.mapToScene(e.pos())     # pour « ajouter un coude ici »
         it = self.itemAt(e.pos())
         if it is not None and not it.isSelected():
@@ -164,6 +166,9 @@ class DiagramView(QGraphicsView):
                 sub = a(menu)            # sous-menu ou action construits à la volée
                 if isinstance(sub, QMenu):
                     menu.addMenu(sub)
+                elif isinstance(sub, list):      # plusieurs actions au premier niveau
+                    for x in sub:
+                        menu.addAction(x)
                 elif sub is not None:
                     menu.addAction(sub)
             else:
