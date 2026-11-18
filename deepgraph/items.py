@@ -409,7 +409,7 @@ class BlockItem(NodeItem):
     label_fr = "Bloc"
     STACK_OFF = 4.0
     SAVE = ["text", "color", "text_color", "font_size", "bold", "italic", "stack", "border_width",
-            "opacity_pct", "stack_dx", "stack_dy", "stack_fade"]
+            "opacity_pct", "stack_dx", "stack_dy", "stack_fade", "base_w", "base_h"]
     PROPS = [
         ("text", "Texte", "text"),
         ("color", "Couleur", "color"),
@@ -441,6 +441,9 @@ class BlockItem(NodeItem):
         self.stack_dy = -self.STACK_OFF
         self.stack_fade = True          # copies de plus en plus transparentes
         self.opacity_pct = 100
+        # taille voulue (bibliothèque ou redimensionnement) ; None = la taille actuelle.
+        # Ajusté au texte, le bloc fait au moins cette taille et y revient quand le texte rétrécit.
+        self.base_w = self.base_h = None
 
     def text_size(self):
         """Taille effective du texte (px) : la sienne, ou la taille globale du diagramme."""
@@ -453,7 +456,11 @@ class BlockItem(NodeItem):
         sc = self.scene()
         return bool(sc is not None and getattr(sc, "fit_text", False))
 
-    def text_need(self):
+    def base_size(self):
+        return (float(self.base_w) if self.base_w is not None else self.w,
+                float(self.base_h) if self.base_h is not None else self.h)
+
+    def text_need(self, width=None):
         """Taille minimale pour que le texte ne déborde pas. Comme à l'affichage, un texte sans
         formule revient à la ligne : la largeur doit contenir le mot le plus long, la hauteur
         les lignes obtenues à cette largeur."""
@@ -468,12 +475,13 @@ class BlockItem(NodeItem):
         else:
             words = text.split() or [" "]
             nw = max(fm.horizontalAdvance(wd) for wd in words) + 2 * self.TEXT_PAD_X
-            wrap_w = max(self.w, nw) - 8                  # même rectangle que paint()
+            wrap_w = max(self.w if width is None else width, nw) - 8      # même rectangle que paint()
             r = fm.boundingRect(QRectF(0, 0, wrap_w, 1e5), int(Qt.AlignHCenter | Qt.TextWordWrap), text)
             nh = r.height() - slack + 2 * self.TEXT_PAD_Y
         return max(self.MIN, nw), max(self.MIN, nh)
 
     def set_size(self, w, h):
+        self.base_w, self.base_h = float(w), float(h)       # taille demandée = taille voulue
         if self.fit_active():
             nw, nh = self.text_need()
             sc = self.scene()
@@ -486,9 +494,18 @@ class BlockItem(NodeItem):
     def fit_to_text(self, exact=False):
         """Agrandit le bloc (ou, exact=True, le met juste à la taille du texte) en gardant son centre.
         Renvoie True si la taille a changé."""
-        nw, nh = self.text_need()
-        tw, th = (nw, nh) if exact else (max(self.w, nw), max(self.h, nh))
         sc = self.scene()
+        shrink = exact or bool(sc is not None and getattr(sc, "fit_shrink", True))
+        if exact:
+            nw, nh = self.text_need()
+            tw, th = nw, nh
+        elif shrink:                     # retour vers la taille voulue, jamais sous le texte
+            bw, bh = self.base_size()
+            nw, nh = self.text_need(bw)
+            tw, th = max(bw, nw), max(bh, nh)
+        else:                            # agrandir seulement
+            nw, nh = self.text_need()
+            tw, th = max(self.w, nw), max(self.h, nh)
         g = float(sc.grid_size) if sc is not None and sc.snap_enabled else 0.0
         dw, dh = tw - self.w, th - self.h
         if g > 0:   # variation multiple de 2 × grille : les bords restent sur la grille
@@ -502,7 +519,11 @@ class BlockItem(NodeItem):
         self.setPos(self.pos() - QPointF(dw / 2, dh / 2))
         if sc is not None:
             sc.suspend_snap = old
+        if self.base_w is None:          # mémorise la taille voulue avant le premier ajustement
+            self.base_w, self.base_h = self.w, self.h
         NodeItem.set_size(self, self.w + dw, self.h + dh)
+        if exact:
+            self.base_w, self.base_h = self.w, self.h
         return True
 
     def on_props_changed(self):

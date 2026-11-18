@@ -45,6 +45,7 @@ class DiagramScene(LayersMixin, QGraphicsScene):
         self.arrow_width = float(CFG.style["arrow_width"])
         self.font_size = int(CFG.style["font_size"])        # taille globale du texte (px)
         self.fit_text = True              # blocs agrandis pour que leur texte ne déborde pas
+        self.fit_shrink = True            # … et qui reviennent à leur taille quand le texte rétrécit
         self.dark = False  # mode sombre (affichage seulement, jamais à l'export)
         self._init_layers()
         self._hl_layer = None      # calque survolé dans le panneau (surbrillance)
@@ -448,7 +449,7 @@ class DiagramScene(LayersMixin, QGraphicsScene):
     # ------------------------------------------------------- réglages globaux
     def settings(self):
         d = {"border_width": self.border_width, "arrow_width": self.arrow_width, "font_size": self.font_size,
-             "fit_text": self.fit_text}
+             "fit_text": self.fit_text, "fit_shrink": self.fit_shrink}
         if CFG.family_override:
             d["font"] = CFG.family_override
         return d
@@ -479,13 +480,14 @@ class DiagramScene(LayersMixin, QGraphicsScene):
         return getattr(self, key)
 
     def set_global(self, key, value):
-        if key not in ("border_width", "arrow_width", "font_size", "fit_text"):
+        if key not in ("border_width", "arrow_width", "font_size", "fit_text", "fit_shrink"):
             return
-        value = int(value) if key == "font_size" else bool(value) if key == "fit_text" else float(value)
+        value = (int(value) if key == "font_size" else bool(value) if key in ("fit_text", "fit_shrink")
+                 else float(value))
         if getattr(self, key) == value:
             return
         setattr(self, key, value)
-        if key in ("font_size", "fit_text"):
+        if key in ("font_size", "fit_text", "fit_shrink"):
             self.refresh_style()          # textes re-mesurés, blocs ajustés, groupes réajustés
         else:
             self._refresh_widths()
@@ -498,6 +500,7 @@ class DiagramScene(LayersMixin, QGraphicsScene):
         self.arrow_width = float(st.get("arrow_width", CFG.style["arrow_width"]))
         self.font_size = int(st.get("font_size", CFG.style["font_size"]))
         self.fit_text = bool(st.get("fit_text", False))       # ancien fichier : tailles inchangées
+        self.fit_shrink = bool(st.get("fit_shrink", True))
         if (st.get("font") or None) != CFG.family_override:
             CFG.set_family_override(st.get("font") or None)
             self.refresh_style()

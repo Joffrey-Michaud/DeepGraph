@@ -361,12 +361,20 @@ class MainWindow(QMainWindow):
         self.width_boxes["font_size"] = sb
         self.fit_box = QCheckBox("Blocs ajustés au texte")
         self.fit_box.setToolTip("Les blocs s'agrandissent pour que leur texte ne déborde jamais "
-                                "(ils ne rétrécissent pas tout seuls :\nclic droit > « Ajuster la taille au texte » "
-                                "pour les mettre juste à la taille du texte).")
+                                "(« Réduire aussi » : ils reviennent ensuite à leur taille d'origine ;\nclic droit > "
+                                "« Ajuster la taille au texte » pour les mettre juste à la taille du texte).")
         self.fit_box.setChecked(self.scene.fit_text)
         self.fit_box.toggled.connect(lambda v: self.scene.set_global("fit_text", v))
         tb2.addWidget(QLabel("  "))
         tb2.addWidget(self.fit_box)
+        self.shrink_box = QCheckBox("Réduire aussi")
+        self.shrink_box.setToolTip("Quand le texte rétrécit (taille du texte, texte plus court…), les blocs "
+                                   "agrandis reviennent vers leur taille d'origine\n(celle de la bibliothèque, "
+                                   "ou celle donnée en redimensionnant le bloc), sans descendre sous le texte.")
+        self.shrink_box.setChecked(self.scene.fit_shrink)
+        self.shrink_box.setEnabled(self.scene.fit_text)
+        self.shrink_box.toggled.connect(lambda v: self.scene.set_global("fit_shrink", v))
+        tb2.addWidget(self.shrink_box)
         self.scene.settingsChanged.connect(self._sync_widths)
 
         tb2.addSeparator()
@@ -392,10 +400,12 @@ class MainWindow(QMainWindow):
 
     # ----------------------------------------------------------------- état
     def _sync_widths(self):
-        if self.fit_box.isChecked() != self.scene.fit_text:
-            self.fit_box.blockSignals(True)
-            self.fit_box.setChecked(self.scene.fit_text)
-            self.fit_box.blockSignals(False)
+        for box, val in ((self.fit_box, self.scene.fit_text), (self.shrink_box, self.scene.fit_shrink)):
+            if box.isChecked() != val:
+                box.blockSignals(True)
+                box.setChecked(val)
+                box.blockSignals(False)
+        self.shrink_box.setEnabled(self.scene.fit_text)
         for key, sb in self.width_boxes.items():
             v = getattr(self.scene, key)
             if abs(sb.value() - v) > 1e-9:
