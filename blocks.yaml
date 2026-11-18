@@ -38,7 +38,7 @@
 # =============================================================================
 
 style:
-  font: [Helvetica, Nimbus Sans, Arial, Liberation Sans, DejaVu Sans]
+  font: [Helvetica, TeX Gyre Heros, Nimbus Sans, Arial, Liberation Sans, DejaVu Sans]
   font_size: 13            # px
   text_color: "#000000"
   border_color: "#2B2B2B"

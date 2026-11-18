@@ -10,7 +10,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_CONFIG = os.path.join(ROOT, "blocks.yaml")
 
 DEFAULT_STYLE = {
-    "font": ["Helvetica", "Nimbus Sans", "Nimbus Sans L", "Arial", "Liberation Sans", "DejaVu Sans"],
+    "font": ["Helvetica", "TeX Gyre Heros", "Nimbus Sans", "Nimbus Sans L", "Arial", "Liberation Sans", "DejaVu Sans"],
     "font_size": 13,              # px
     "text_color": "#000000",
     "border_color": "#2B2B2B",
@@ -137,13 +137,30 @@ class Config:
     # ----------------------------------------------------------------- fonts
     @staticmethod
     def resolve_family(name):
-        """Nom de police -> famille Qt installée (ou None si absente)."""
+        """Nom de police -> famille Qt installée (ou None si absente).
+
+        Une même police peut être enregistrée sous plusieurs fonderies (« Nimbus Sans [URW ] »,
+        « Nimbus Sans [urw] », « Nimbus Sans [UKWN] »), certaines avec une partie seulement de ses
+        styles. Prendre la première venue peut donner une fonderie sans style droit : tout le texte
+        sort alors en italique. On garde donc la fonderie la plus complète (styles droits et
+        italiques, sinon au moins un style droit), la première en cas d'égalité."""
         if not name:
             return None
-        fams = QFontDatabase().families()
+        db = QFontDatabase()
+        fams = db.families()
         c = str(name).lower()
-        return (next((f for f in fams if f.lower() == c), None)
-                or next((f for f in fams if f.lower().startswith(c + " [")), None))
+        exact = next((f for f in fams if f.lower() == c), None)
+        if exact:
+            return exact
+        cands = [f for f in fams if f.lower().startswith(c + " [")]
+        if not cands:
+            return None
+
+        def completeness(fam):
+            italic = [db.italic(fam, s) for s in db.styles(fam)]
+            return 2 * any(not i for i in italic) + any(italic)
+
+        return max(cands, key=completeness)
 
     def default_family(self):
         cands = self.style["font"]
