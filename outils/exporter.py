@@ -24,6 +24,7 @@ from PyQt5.QtWidgets import QApplication  # noqa: E402
 
 app = QApplication(sys.argv[:1])
 
+from deepgraph import updater  # noqa: E402
 from deepgraph.config import CFG, DEFAULT_CONFIG  # noqa: E402
 from deepgraph.export import export_scene  # noqa: E402
 from deepgraph.scene import DiagramScene  # noqa: E402
@@ -62,6 +63,8 @@ def main():
     ap.add_argument("--scale", type=float, default=4.0, help="échelle du PNG (défaut : 4)")
     ap.add_argument("--transparent", action="store_true", help="PNG sur fond transparent")
     ap.add_argument("--config", default=DEFAULT_CONFIG, help="fichier YAML de blocs (défaut : blocks.yaml)")
+    ap.add_argument("--no-update-check", action="store_true",
+                    help="ne pas chercher de mise à jour de DeepGraph (ou DEEPGRAPH_NO_UPDATE=1)")
     args = ap.parse_args()
 
     formats = [f.strip().lower() for f in args.formats.split(",") if f.strip()]
@@ -73,6 +76,8 @@ def main():
     if args.out and args.dir:
         ap.error("-o / --out et -d / --dir s'excluent")
 
+    if not args.no_update_check and not updater.disabled():
+        updater.run_terminal(ask=True)          # demande seulement dans un terminal interactif
     CFG.load(args.config)
     for err in CFG.errors:
         print("[config]", err, file=sys.stderr)

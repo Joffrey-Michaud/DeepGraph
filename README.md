@@ -5,6 +5,7 @@
 ```bash
 pip install -r requirements.txt     # PyQt5 + PyYAML
 python main.py                      # ou : python main.py mon_schema.dgraph
+python main.py --update             # installe la dernière release
 ```
 
 > **Modifier DeepGraph : une branche par modification, jamais de push sur `main`.** Chaque
@@ -56,6 +57,23 @@ python outils/exporter.py schema.dgraph --font "TeX Gyre Termes" --scale 6
 
 PDF et SVG sont vectoriels (texte sélectionnable, polices intégrées). `--font` remplace la police du
 diagramme, `--scale` règle la résolution du PNG (4 par défaut), `--transparent` enlève le fond blanc.
+
+## Mises à jour
+
+Au démarrage, DeepGraph cherche une release plus récente sur GitHub et **propose de l'installer** (à chaque
+démarrage tant qu'elle n'est pas installée) ; **Aide > Rechercher des mises à jour…** le fait à la demande.
+
+- **En fenêtre** : vérification en tâche de fond, boîte « Mise à jour disponible » avec les notes de version,
+  puis proposition de redémarrer.
+- **Sans fenêtre** (`outils/exporter.py`, éditeur lancé avec `QT_QPA_PLATFORM=offscreen`) : question dans le
+  terminal s'il est interactif, sinon simple message. `python main.py --update` installe directement.
+- **Installation** : dans un clone git, `main` avance jusqu'au tag de la release (seulement sur `main` sans
+  modification locale, sinon rien n'est touché) ; dans une copie (.zip), l'archive de la release remplace les
+  fichiers, un `blocks.yaml` modifié est conservé (la nouvelle version est posée à côté, `blocks.yaml.nouveau`).
+- **Accès** : le dépôt est privé. La vérification utilise un jeton (`DEEPGRAPH_TOKEN`, `GITHUB_TOKEN` ou
+  `GH_TOKEN`), sinon GitHub CLI connecté (`gh auth login`), sinon `git` pour un clone. Sans aucun de ces moyens,
+  un avertissement explique quoi installer.
+- **Désactiver** : `--no-update-check` ou `DEEPGRAPH_NO_UPDATE=1`.
 
 ## Générer un schéma avec un LLM
 

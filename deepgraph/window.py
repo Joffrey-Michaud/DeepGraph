@@ -20,7 +20,7 @@ from .scene import FORMAT, DiagramScene
 from .stack_dialog import StackDialog
 from .order_panel import OrderPanel
 from .help_dialog import DocDialog
-from . import docs
+from . import __version__, docs
 from .view import DiagramView
 
 FILE_FILTER = "Diagramme DeepGraph (*.dgraph);;Tous les fichiers (*)"
@@ -230,6 +230,7 @@ class MainWindow(QMainWindow):
                                     tip="Format .dgraph expliqué à un LLM, pour lui faire générer le schéma "
                                         "d'un modèle")
         self.a_help_guide = self._act("Guide d'utilisation…", self.show_user_guide, "F1")
+        self.a_help_update = self._act("Rechercher des mises à jour…", self.check_updates)
         self.a_stack = self._act("Empiler (stack)…", self.stack_dialog,
                                  tip="Ajoute derrière le bloc des copies sans texte (style « ×h »)")
         self.a_reapply = self._act("Réappliquer les couleurs de la config aux blocs", self.scene.reapply_config)
@@ -284,6 +285,11 @@ class MainWindow(QMainWindow):
         m = mb.addMenu("Ai&de")
         m.addAction(self.a_help_guide)
         m.addAction(self.a_help_llm)
+        m.addSeparator()
+        m.addAction(self.a_help_update)
+        a = m.addAction(f"À propos de DeepGraph {__version__}")
+        a.triggered.connect(lambda: QMessageBox.about(
+            self, "À propos", f"<b>DeepGraph {__version__}</b><br>Éditeur de schémas de réseaux de neurones."))
 
     def _make_toolbar(self):
         tb = self.addToolBar("Principal")
@@ -467,6 +473,10 @@ class MainWindow(QMainWindow):
                        "LLM, puis donner le code du modèle. Enregistrer sa réponse JSON dans un fichier .dgraph "
                        "et l'ouvrir (Fichier > Ouvrir). La liste des blocs (annexe) reflète la configuration "
                        "actuelle.", "DGRAPH_POUR_LLM.md")
+
+    def check_updates(self):
+        from .update_ui import check_in_background
+        check_in_background(self, manual=True)
 
     def show_user_guide(self):
         self._show_doc("_guide", "Guide d'utilisation — DeepGraph", docs.user_guide(), "", "DeepGraph_guide.md")
