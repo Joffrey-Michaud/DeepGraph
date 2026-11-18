@@ -83,6 +83,13 @@ démarrage tant qu'elle n'est pas installée) ; **Aide > Rechercher des mises à
   `DEEPGRAPH_NO_AUTO_UPDATE=1` garde la vérification sans terminal interactif mais n'installe plus rien
   tout seul (simple message).
 
+## Brouillon depuis un modèle PyTorch (prototype)
+
+`python outils/depuis_pytorch.py models/mon_modele.py:MaClasse -e x:1,3,224,224 -o brouillon.dgraph` exécute
+le modèle une fois et en dessine la structure (blocs, liaisons, formes, « N× », forme en U pour les U-Net),
+sans LLM. `--detail Classe` ajoute l'intérieur d'une classe en encart. Documentation complète :
+**Aide > Schéma depuis un modèle PyTorch…** ou [docs/DEPUIS_PYTORCH.md](docs/DEPUIS_PYTORCH.md).
+
 ## Générer un schéma avec un LLM
 
 Menu **Aide > Documentation pour LLM…** : « Copier tout », coller dans la conversation, puis donner le code du modèle (même texte que [docs/DGRAPH_POUR_LLM.md](docs/DGRAPH_POUR_LLM.md), avec la liste des blocs toujours à jour) : il produit un `.dgraph`

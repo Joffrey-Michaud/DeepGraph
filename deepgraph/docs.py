@@ -6,6 +6,7 @@ from .config import CFG
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LLM_DOC = os.path.join(ROOT, "docs", "DGRAPH_POUR_LLM.md")
 README = os.path.join(ROOT, "README.md")
+PYTORCH_DOC = os.path.join(ROOT, "docs", "DEPUIS_PYTORCH.md")
 ANNEX = "## Annexe"
 
 
@@ -52,3 +53,7 @@ def llm_doc():
 
 def user_guide():
     return _read(README)
+
+
+def pytorch_doc():
+    return _read(PYTORCH_DOC)

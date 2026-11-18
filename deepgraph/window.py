@@ -235,6 +235,9 @@ class MainWindow(QMainWindow):
                                     tip="Format .dgraph expliqué à un LLM, pour lui faire générer le schéma "
                                         "d'un modèle")
         self.a_help_guide = self._act("Guide d'utilisation…", self.show_user_guide, "F1")
+        self.a_help_pytorch = self._act("Schéma depuis un modèle PyTorch…", self.show_pytorch_doc,
+                                        tip="Fabriquer un brouillon de schéma à partir du code PyTorch d'un modèle "
+                                            "(outils/depuis_pytorch.py)")
         self.a_help_update = self._act("Rechercher des mises à jour…", self.check_updates)
         self.a_stack = self._act("Empiler (stack)…", self.stack_dialog,
                                  tip="Ajoute derrière le bloc des copies sans texte (style « ×h »)")
@@ -289,6 +292,7 @@ class MainWindow(QMainWindow):
             m.addSeparator() if a is None else m.addAction(a)
         m = mb.addMenu("Ai&de")
         m.addAction(self.a_help_guide)
+        m.addAction(self.a_help_pytorch)
         m.addAction(self.a_help_llm)
         m.addSeparator()
         m.addAction(self.a_help_update)
@@ -517,6 +521,13 @@ class MainWindow(QMainWindow):
     def check_updates(self):
         from .update_ui import check_in_background
         check_in_background(self, manual=True)
+
+    def show_pytorch_doc(self):
+        tool = os.path.join(docs.ROOT, "outils", "depuis_pytorch.py")
+        self._show_doc("_pytorch_doc", "Schéma depuis un modèle PyTorch", docs.pytorch_doc(),
+                       f"Commande à lancer dans un terminal, depuis la racine du projet du modèle : "
+                       f"python {tool} fichier.py:Classe -e x:1,3,224,224 -o brouillon.dgraph",
+                       "DEPUIS_PYTORCH.md")
 
     def show_user_guide(self):
         self._show_doc("_guide", "Guide d'utilisation — DeepGraph", docs.user_guide(), "", "DeepGraph_guide.md")
