@@ -12,6 +12,7 @@ Un fichier au format complet (celui qu'écrit l'éditeur) traverse cette fonctio
 import copy
 
 from .config import CFG
+from . import items as _items
 from .items import NODE_TYPES
 
 SIDES = {"top": (.5, 0.0), "bottom": (.5, 1.0), "left": (0.0, .5), "right": (1.0, .5), "center": (.5, .5),
@@ -22,6 +23,22 @@ SIDE_ALIASES = {"haut": "top", "bas": "bottom", "gauche": "left", "droite": "rig
 
 class FormatError(ValueError):
     pass
+
+
+def migrate_font_sizes(data):
+    """Fichiers d'avant la taille de texte globale (pas de settings.font_size) : les tailles
+    égales au défaut de l'époque (texte 13 px, étiquette de groupe 15 px) suivent désormais
+    la taille globale. Les tailles choisies à la main sont conservées."""
+    st = data.get("settings")
+    if isinstance(st, dict) and "font_size" in st:
+        return data
+    fs, gs = int(CFG.style["font_size"]), int(CFG.style["group_label_size"])
+    for d in data.get("nodes") or []:
+        if d.get("type") in ("block", "text") and d.get("font_size") == fs:
+            d["font_size"] = None
+        elif d.get("type") == "group" and d.get("label_size") == gs:
+            d["label_size"] = None
+    return data
 
 
 def _side(name):
@@ -67,6 +84,21 @@ def _lib_defaults(d):
         d.setdefault("bold", bd.bold)
     if bd.stack:
         d.setdefault("stack", bd.stack)
+
+
+def _probe_sizes(nodes):
+    """Valeurs par défaut (bibliothèque, type) et taille réelle de chaque nœud."""
+    for d in nodes:
+        _lib_defaults(d)
+        d.setdefault("type", "block")
+        cls = NODE_TYPES.get(d["type"])
+        if cls is None:
+            raise FormatError(f"« {d['_key']} » : type inconnu « {d['type']} » "
+                              f"(attendu : {', '.join(NODE_TYPES)})")
+        if d["type"] == "group" and "children" in d:
+            d.setdefault("label", "")
+        probe = cls.from_dict(d)              # taille réelle (textes mesurés, tailles par défaut)
+        d["w"], d["h"] = float(probe.w), float(probe.h)
 
 
 def expand(data):
@@ -122,17 +154,12 @@ def expand(data):
         return d
 
     # --------------------------------------------- valeurs par défaut, tailles
-    for d in nodes:
-        _lib_defaults(d)
-        d.setdefault("type", "block")
-        cls = NODE_TYPES.get(d["type"])
-        if cls is None:
-            raise FormatError(f"« {d['_key']} » : type inconnu « {d['type']} » "
-                              f"(attendu : {', '.join(NODE_TYPES)})")
-        if d["type"] == "group" and "children" in d:
-            d.setdefault("label", "")
-        probe = cls.from_dict(d)              # taille réelle (textes mesurés, tailles par défaut)
-        d["w"], d["h"] = float(probe.w), float(probe.h)
+    st = data.get("settings") if isinstance(data.get("settings"), dict) else {}
+    _items._FONT_FALLBACK[0] = st.get("font_size")          # mesure des textes à la bonne taille
+    try:
+        _probe_sizes(nodes)
+    finally:
+        _items._FONT_FALLBACK[0] = None
 
     # ---------------------------------------- groupes déclarés par « children »
     parent_of = {}

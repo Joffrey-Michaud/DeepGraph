@@ -37,16 +37,17 @@ les cadres des groupes et les côtés des flèches.
 Réglages globaux (facultatifs), à côté de `nodes` et `arrows` :
 
 ```json
-"settings": {"font": "TeX Gyre Termes", "border_width": 1.6, "arrow_width": 1.6}
+"settings": {"font": "TeX Gyre Termes", "font_size": 13, "border_width": 1.6, "arrow_width": 1.6}
 ```
 
 | clé | défaut | rôle |
 |---|---|---|
 | `font` | police de `blocks.yaml` (Helvetica ou équivalent) | police de tout le diagramme (nom de famille installée) |
+| `font_size` | 13 | taille globale du texte (px) des blocs et textes sans `font_size` propre ; étiquettes de groupe sans `label_size` : cette taille + 2 |
 | `border_width` | 1.6 | épaisseur des bords des blocs |
 | `arrow_width` | 1.6 | épaisseur des flèches |
 
-Ne les mets que si l'utilisateur demande une police ou des épaisseurs particulières (par exemple
+Ne les mets que si l'utilisateur demande une police, une taille de texte ou des épaisseurs particulières (par exemple
 une police à empattements pour suivre le texte d'un article).
 
 ### Repère
@@ -88,7 +89,7 @@ Propriétés d'un bloc (`"type": "block"`, toutes facultatives) :
 | `text` | texte | `"Bloc"` | texte centré, `\n` pour aller à la ligne |
 | `color` | `"#RRGGBB"` | `"#FFFFFF"` | couleur de fond |
 | `w`, `h` | nombre | 110, 28 | largeur, hauteur (px) |
-| `font_size` | entier | 13 | taille du texte (px) |
+| `font_size` | entier ou null | null | taille du texte (px) ; null ou absent = taille globale (`settings.font_size`) |
 | `bold`, `italic` | booléen | false | style du texte |
 | `text_color` | `"#RRGGBB"` | `"#000000"` | couleur du texte |
 | `stack` | entier | 0 | nombre de **copies empilées derrière** (effet « ×h » des têtes d'attention) |
@@ -112,9 +113,9 @@ Symboles : `plus` (⊕ addition / résiduelle), `concat` (concaténation), `time
 ### 3.4 Texte libre (étiquettes : entrées, sorties, Q/K/V, dimensions)
 
 ```json
-{"id": "lbl_x", "type": "text", "text": "x", "cx": 0, "cy": 0, "italic": true, "font_size": 13}
+{"id": "lbl_x", "type": "text", "text": "x", "cx": 0, "cy": 0, "italic": true}
 ```
-Clés : `text`, `font_size` (13), `bold`, `italic`, `color` (`"#000000"`), `align` (`"center"`,
+Clés : `text`, `font_size` (absent = taille globale, 13 par défaut), `bold`, `italic`, `color` (`"#000000"`), `align` (`"center"`,
 `"left"`, `"right"`). La taille du cadre est calculée automatiquement.
 Pour une petite annotation discrète : `"font_size": 10, "color": "#555555", "italic": true`.
 
@@ -143,7 +144,7 @@ Q, K et V, skip connection… La flèche qui arrive sur une jonction a en géné
 |---|---|---|
 | `label` | `""` | texte, ex. `"N×"`, `"L×"`, `"Encoder"` |
 | `label_pos` | `"left"` | `left`, `right`, `top`, `bottom`, `inside`, `none` |
-| `label_size` | 15 | taille du texte de l'étiquette |
+| `label_size` | null | taille du texte de l'étiquette (null = taille globale + 2, soit 15) |
 | `fill` | `"#F2F2F2"` | couleur de fond (`"#FFFFFF"` pour un cadre blanc) |
 | `border_style` | `"solid"` | `solid`, `dashed`, `none` |
 | `margin` | 15 | marge autour du contenu (4 côtés) |
@@ -296,7 +297,7 @@ Attention à plusieurs entrées (V, K, Q en bas d'un bloc, flux bas → haut) :
 
 L'éditeur enregistre une version développée du même fichier : `uid` entiers, `x`/`y` = coin
 haut-gauche (relatif au groupe parent pour un enfant, avec `"parent": uid`), flèches avec
-`{"node": uid, "fx": 0–1, "fy": 0–1}`, plus `"settings"` (épaisseurs, police) et `"layers"`
+`{"node": uid, "fx": 0–1, "fy": 0–1}`, plus `"settings"` (épaisseurs, police, taille du texte) et `"layers"`
 (calques). Les deux formes sont acceptées à l'ouverture ; **écris toujours la forme simplifiée**.
 
 ---

@@ -86,9 +86,9 @@ class Draw:
         self.sc.add_node(it, P(x, y))
         return self._place(it, x, y)
 
-    def txt(self, t, x, y, size=13, color="#000000", italic=False, bold=False, align="center"):
+    def txt(self, t, x, y, size=None, color="#000000", italic=False, bold=False, align="center"):
         it = TextItem(t)
-        it.font_size, it.color, it.italic, it.bold, it.align = size, color, italic, bold, align
+        it.font_size, it.color, it.italic, it.bold, it.align = size, color, italic, bold, align  # None = taille globale
         it.on_props_changed()
         self.sc.add_node(it, P(x, y))
         self._place(it, x, y)

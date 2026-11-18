@@ -43,6 +43,7 @@ class DiagramScene(LayersMixin, QGraphicsScene):
         # épaisseurs globales du diagramme (enregistrées dans le .dgraph)
         self.border_width = float(CFG.style["border_width"])
         self.arrow_width = float(CFG.style["arrow_width"])
+        self.font_size = int(CFG.style["font_size"])        # taille globale du texte (px)
         self.dark = False  # mode sombre (affichage seulement, jamais à l'export)
         self._init_layers()
         self._hl_layer = None      # calque survolé dans le panneau (surbrillance)
@@ -105,7 +106,7 @@ class DiagramScene(LayersMixin, QGraphicsScene):
                 it = OperatorItem(d.symbol, d.color, d.width)
             else:
                 it = BlockItem(d.label, d.color, d.width, d.height)
-                if d.font_size:
+                if d.font_size:                    # taille propre au bloc de la bibliothèque
                     it.font_size = int(d.font_size)
                 if d.text_color:
                     it.text_color = d.text_color
@@ -432,7 +433,7 @@ class DiagramScene(LayersMixin, QGraphicsScene):
 
     # ------------------------------------------------------- réglages globaux
     def settings(self):
-        d = {"border_width": self.border_width, "arrow_width": self.arrow_width}
+        d = {"border_width": self.border_width, "arrow_width": self.arrow_width, "font_size": self.font_size}
         if CFG.family_override:
             d["font"] = CFG.family_override
         return d
@@ -455,11 +456,24 @@ class DiagramScene(LayersMixin, QGraphicsScene):
         self.checkpoint()
         self.settingsChanged.emit()
 
+    def global_value(self, key):
+        """Valeur globale servant de défaut aux propriétés « …_opt » des éléments."""
+        if key == "group_label_size":
+            from .items import group_label_delta
+            return self.font_size + group_label_delta()
+        return getattr(self, key)
+
     def set_global(self, key, value):
-        if key not in ("border_width", "arrow_width") or getattr(self, key) == float(value):
+        if key not in ("border_width", "arrow_width", "font_size"):
             return
-        setattr(self, key, float(value))
-        self._refresh_widths()
+        value = int(value) if key == "font_size" else float(value)
+        if getattr(self, key) == value:
+            return
+        setattr(self, key, value)
+        if key == "font_size":
+            self.refresh_style()          # textes re-mesurés, groupes réajustés
+        else:
+            self._refresh_widths()
         self.checkpoint()
         self.settingsChanged.emit()
 
@@ -467,6 +481,7 @@ class DiagramScene(LayersMixin, QGraphicsScene):
         st = data.get("settings") or {}
         self.border_width = float(st.get("border_width", CFG.style["border_width"]))
         self.arrow_width = float(st.get("arrow_width", CFG.style["arrow_width"]))
+        self.font_size = int(st.get("font_size", CFG.style["font_size"]))
         if (st.get("font") or None) != CFG.family_override:
             CFG.set_family_override(st.get("font") or None)
             self.refresh_style()
@@ -841,6 +856,14 @@ class DiagramScene(LayersMixin, QGraphicsScene):
 
     def from_dict(self, data, offset=None, new_ids=False, external=False):
         """external : les flèches peuvent viser des éléments déjà présents (par uid)."""
+        from . import items as _items
+        old_fb, _items._FONT_FALLBACK[0] = _items._FONT_FALLBACK[0], self.font_size  # textes mesurés à la taille du diagramme
+        try:
+            return self._from_dict(data, offset, new_ids, external)
+        finally:
+            _items._FONT_FALLBACK[0] = old_fb
+
+    def _from_dict(self, data, offset=None, new_ids=False, external=False):
         offset = offset or QPointF(0, 0)
         ext = {n.uid: n for n in self.nodes()} if external else None
         old, self.suspend_snap = self.suspend_snap, True
@@ -950,8 +973,8 @@ class DiagramScene(LayersMixin, QGraphicsScene):
         self.modified.emit()
 
     def load(self, data):
-        from .simple_format import expand      # format simplifié (écrit à la main / par un LLM)
-        data = expand(data)
+        from .simple_format import expand, migrate_font_sizes      # format simplifié (écrit à la main / par un LLM)
+        data = migrate_font_sizes(expand(data))
         self.clearSelection()
         self._temp = None
         self.clear()

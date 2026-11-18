@@ -18,6 +18,24 @@ def global_width(item, key):
     return float(v if v is not None else CFG.style[key])
 
 
+# taille globale utilisée hors scène (ex. mesure des textes pendant simple_format.expand)
+_FONT_FALLBACK = [None]
+
+
+def global_font_size(item):
+    """Taille de texte globale du diagramme (px)."""
+    s = item.scene() if item is not None else None
+    v = getattr(s, "font_size", None) if s is not None else None
+    if v is None:
+        v = _FONT_FALLBACK[0]
+    return int(v if v is not None else CFG.style["font_size"])
+
+
+def group_label_delta():
+    """Écart entre l'étiquette de groupe par défaut et le texte par défaut (15 - 13 = 2 px)."""
+    return int(CFG.style["group_label_size"]) - int(CFG.style["font_size"])
+
+
 def free_move():
     """Maj enfoncée = pas d'aimantation (grille ni guides)."""
     return bool(QApplication.keyboardModifiers() & Qt.ShiftModifier)
@@ -397,7 +415,7 @@ class BlockItem(NodeItem):
         ("opacity_pct", "Opacité (%)", "int", (0, 100)),
         ("border_width", "Épaisseur du bord", "width_opt", "border_width"),
         ("text_color", "Couleur du texte", "color"),
-        ("font_size", "Taille du texte (px)", "int", (5, 80)),
+        ("font_size", "Taille du texte (px)", "size_opt", "font_size"),
         ("bold", "Gras", "bool"),
         ("italic", "Italique", "bool"),
         ("stack", "Copies empilées derrière", "int", (0, 50)),
@@ -414,7 +432,7 @@ class BlockItem(NodeItem):
         self.text = text
         self.color = color
         self.text_color = st["text_color"]
-        self.font_size = int(st["font_size"])
+        self.font_size = None        # None = taille globale du diagramme
         self.bold = False
         self.italic = False
         self.stack = 0                 # nombre de copies (sans texte) dessinées derrière le bloc
@@ -422,6 +440,10 @@ class BlockItem(NodeItem):
         self.stack_dy = -self.STACK_OFF
         self.stack_fade = True          # copies de plus en plus transparentes
         self.opacity_pct = 100
+
+    def text_size(self):
+        """Taille effective du texte (px) : la sienne, ou la taille globale du diagramme."""
+        return int(self.font_size) if self.font_size is not None else global_font_size(self)
 
     def _stack_count(self):
         return max(0, int(self.stack or 0))
@@ -490,7 +512,7 @@ class BlockItem(NodeItem):
         painter.setPen(pen)
         painter.setBrush(fill)
         painter.drawRoundedRect(self.rect(), r, r)
-        painter.setFont(CFG.font(self.font_size, self.bold, self.italic))
+        painter.setFont(CFG.font(self.text_size(), self.bold, self.italic))
         painter.setPen(QColor(self.text_color))
         painter.drawText(self.rect().adjusted(4, 1, -4, -1),
                          int(Qt.AlignCenter | Qt.TextWordWrap), self.text)
@@ -569,7 +591,7 @@ class TextItem(NodeItem):
     SAVE = ["text", "font_size", "bold", "italic", "color", "align"]
     PROPS = [
         ("text", "Texte", "text"),
-        ("font_size", "Taille (px)", "int", (5, 120)),
+        ("font_size", "Taille (px)", "size_opt", "font_size"),
         ("bold", "Gras", "bool"),
         ("italic", "Italique", "bool"),
         ("color", "Couleur", "color"),
@@ -580,19 +602,23 @@ class TextItem(NodeItem):
         super().__init__(10, 10)
         st = CFG.style
         self.text = text
-        self.font_size = int(st["font_size"])
+        self.font_size = None        # None = taille globale du diagramme
         self.bold = False
         self.italic = False
         self.color = st["text_color"]
         self.align = "center"
         self.on_props_changed()
 
+    def text_size(self):
+        """Taille effective du texte (px) : la sienne, ou la taille globale du diagramme."""
+        return int(self.font_size) if self.font_size is not None else global_font_size(self)
+
     def _flags(self):
         h = {"left": Qt.AlignLeft, "right": Qt.AlignRight}.get(self.align, Qt.AlignHCenter)
         return int(h | Qt.AlignVCenter)
 
     def on_props_changed(self):
-        fm = QFontMetricsF(CFG.font(self.font_size, self.bold, self.italic))
+        fm = QFontMetricsF(CFG.font(self.text_size(), self.bold, self.italic))
         r = fm.boundingRect(QRectF(0, 0, 1e5, 1e5), self._flags(), self.text or " ")
         self.w = r.width() + 2 * self.PAD
         self.h = r.height() + 2 * self.PAD
@@ -616,7 +642,7 @@ class TextItem(NodeItem):
         if skip_paint(self):
             return
         painter.setRenderHint(QPainter.Antialiasing)
-        painter.setFont(CFG.font(self.font_size, self.bold, self.italic))
+        painter.setFont(CFG.font(self.text_size(), self.bold, self.italic))
         painter.setPen(ink(self, self.color))
         painter.drawText(self.rect().adjusted(self.PAD, self.PAD, -self.PAD, -self.PAD),
                          self._flags(), self.text)
@@ -687,7 +713,7 @@ class GroupItem(NodeItem):
     PROPS = [
         ("label", "Étiquette", "line"),
         ("label_pos", "Position étiquette", "choice", LABEL_POS),
-        ("label_size", "Taille étiquette (px)", "int", (5, 120)),
+        ("label_size", "Taille étiquette (px)", "size_opt", "group_label_size"),
         ("fill", "Fond", "color"),
         ("border_style", "Bordure", "choice", BORDERS),
         ("border_width", "Épaisseur du bord", "width_opt", "border_width"),
@@ -711,10 +737,16 @@ class GroupItem(NodeItem):
         self.margin_top = self.margin_bottom = self.margin_left = self.margin_right = None
         self.label = "N×"
         self.label_pos = "left"
-        self.label_size = int(st["group_label_size"])
+        self.label_size = None       # None = taille globale + 2 px
         self.fill = st["group_fill"]
         self.border_style = "solid"
         self.setZValue(-10)
+
+    def text_size(self):
+        """Taille effective de l'étiquette (px) : la sienne, ou la taille globale + 2 px."""
+        if self.label_size is not None:
+            return int(self.label_size)
+        return global_font_size(self) + group_label_delta()
 
     # marges / ajustement au contenu ------------------------------------------
     def side(self, name):
@@ -800,7 +832,7 @@ class GroupItem(NodeItem):
     def label_rect(self):
         if not self.label or self.label_pos == "none":
             return QRectF()
-        fm = QFontMetricsF(CFG.font(self.label_size))
+        fm = QFontMetricsF(CFG.font(self.text_size()))
         br = fm.boundingRect(QRectF(0, 0, 1e5, 1e5), int(Qt.AlignLeft | Qt.AlignTop), self.label)
         tw, th, gap = br.width(), br.height(), 8.0
         pos = self.label_pos
@@ -852,7 +884,7 @@ class GroupItem(NodeItem):
         painter.drawRoundedRect(self.rect(), r, r)
         lr = self.label_rect()
         if not lr.isNull():
-            painter.setFont(CFG.font(self.label_size))
+            painter.setFont(CFG.font(self.text_size()))
             painter.setPen(ink(self, st["text_color"]))
             painter.drawText(lr, int(Qt.AlignLeft | Qt.AlignTop), self.label)
         self.paint_selection(painter)

@@ -180,24 +180,32 @@ class PropertiesPanel(QWidget):
             w.setValue(float(value))
             w.valueChanged.connect(apply)
             return w
-        if typ == "width_opt":
-            # épaisseur individuelle ; None = valeur globale du diagramme (opt = clé globale)
+        if typ in ("width_opt", "size_opt"):
+            # valeur individuelle ; None = valeur globale du diagramme (opt = clé globale)
             box = QWidget()
             lay = QHBoxLayout(box)
             lay.setContentsMargins(0, 0, 0, 0)
-            sb = QDoubleSpinBox()
-            sb.setRange(0.1, 12)
-            sb.setSingleStep(0.1)
-            sb.setDecimals(2)
+            if typ == "width_opt":
+                sb = QDoubleSpinBox()
+                sb.setRange(0.1, 12)
+                sb.setSingleStep(0.1)
+                sb.setDecimals(2)
+                conv = float
+                what = "l'épaisseur globale"
+            else:
+                sb = QSpinBox()
+                sb.setRange(5, 120)
+                conv = int
+                what = "la taille de texte globale"
             btn = QPushButton("Défaut")
-            btn.setToolTip("Revenir à l'épaisseur globale du diagramme (barre d'outils)")
-            glob = float(getattr(self.scene, opt))
+            btn.setToolTip(f"Revenir à {what} du diagramme (barre d'outils)")
+            glob = conv(self.scene.global_value(opt))
 
             def show(is_default):
                 sb.setSuffix("  (défaut)" if is_default else "")
                 btn.setEnabled(not is_default)
 
-            sb.setValue(glob if value is None else float(value))
+            sb.setValue(glob if value is None else conv(value))
             show(value is None)
 
             def changed(v):
@@ -207,7 +215,7 @@ class PropertiesPanel(QWidget):
             def reset():
                 apply(None)
                 sb.blockSignals(True)
-                sb.setValue(float(getattr(self.scene, opt)))
+                sb.setValue(conv(self.scene.global_value(opt)))
                 sb.blockSignals(False)
                 show(True)
 

@@ -7,7 +7,7 @@ from PyQt5.QtGui import QColor, QDesktopServices, QFont, QFontDatabase, QKeySequ
 from PyQt5.QtWidgets import (QAction, QActionGroup, QApplication, QColorDialog, QComboBox, QDockWidget,
                              QStackedWidget,
                              QDoubleSpinBox, QFileDialog, QInputDialog, QLabel, QMainWindow,
-                             QMenu, QMessageBox, QStyle)
+                             QMenu, QMessageBox, QSpinBox, QStyle)
 
 from .arrow import STYLES
 from .items import BlockItem, NodeItem
@@ -341,6 +341,19 @@ class MainWindow(QMainWindow):
             tb2.addWidget(l)
             tb2.addWidget(sb)
             self.width_boxes[key] = sb
+        sb = QSpinBox()
+        sb.setRange(5, 80)
+        sb.setSuffix(" px")
+        sb.setValue(self.scene.font_size)
+        sb.setToolTip("Taille globale du texte des blocs et des textes libres (étiquettes de groupe : +2 px).\n"
+                      "Un élément peut avoir sa propre taille (panneau Propriétés, bouton « Défaut » pour revenir "
+                      "à la taille globale).")
+        sb.valueChanged.connect(lambda v: self.scene.set_global("font_size", v))
+        l = QLabel("  Texte : ")
+        l.setToolTip(sb.toolTip())
+        tb2.addWidget(l)
+        tb2.addWidget(sb)
+        self.width_boxes["font_size"] = sb
         self.scene.settingsChanged.connect(self._sync_widths)
 
         tb2.addSeparator()

@@ -35,8 +35,9 @@ python main.py --update             # installe la dernière release
 | Groupes de calques | sélectionner plusieurs calques (Ctrl / Maj + clic) puis « Grouper » ; masquer / verrouiller le groupe s'applique à tous ses calques, les opacités se multiplient |
 | Modèles types | **Fichier > Modèles types** : LeNet-5, AlexNet, VGG-16, Inception, ResNet-18, U-Net, Transformer, attention (fig. 2 de Vaswani et al.), ViT, VAE, GAN, MLP, seq2seq. Le modèle s'ouvre comme un nouveau document sans titre (jamais écrasé). Tout `.dgraph` déposé dans [modeles/](modeles/) apparaît aussi dans le menu ; `python outils/generer_modeles.py` régénère les modèles fournis |
 | Exporter | **Ctrl+E** → PDF / SVG / PNG ; **Ctrl+Maj+E** pour la sélection seule ; sans l'éditeur : `python outils/exporter.py` (voir plus bas) |
-| Police | barre d'outils « Police » (à côté de Bords / Flèches) : s'applique à tout le diagramme et aux exports, enregistrée dans le `.dgraph` ; « Défaut » = police de `blocks.yaml` ; « Autre police… » pour choisir parmi toutes les polices installées |
+| Police | barre d'outils « Police » (à côté de Bords / Flèches / Texte) : s'applique à tout le diagramme et aux exports, enregistrée dans le `.dgraph` ; « Défaut » = police de `blocks.yaml` ; « Autre police… » pour choisir parmi toutes les polices installées |
 | Épaisseurs | barre d'outils « Bords » / « Flèches » (tout le diagramme) ; par élément dans Propriétés, bouton « Défaut » pour revenir au global |
+| Taille du texte | barre d'outils « Texte » (tout le diagramme : blocs, textes libres, étiquettes de groupe à +2 px) ; un élément peut garder sa propre taille (Propriétés, bouton « Défaut » pour revenir au global) |
 | Guides d'alignement | lignes roses pendant un déplacement (bords et centres) ; menu Affichage pour les couper |
 | Sans magnétisme | maintenir **Maj** (grille et guides) |
 | Se retrouver | **Recentrer** (touche Origine) : zoom 100 % centré sur le diagramme ; **Tout afficher** (Ctrl+1) |
