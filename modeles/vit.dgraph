@@ -1,0 +1,685 @@
+{
+ "format": "deepgraph",
+ "version": 1,
+ "nodes": [
+  {
+   "type": "text",
+   "uid": 1,
+   "x": -70.32,
+   "y": -12.0,
+   "w": 140.64,
+   "h": 24.0,
+   "text": "Image → patchs 16×16",
+   "font_size": 13,
+   "bold": false,
+   "italic": false,
+   "color": "#000000",
+   "align": "center",
+   "order": 0,
+   "parent": null,
+   "layer": 1
+  },
+  {
+   "type": "block",
+   "uid": 2,
+   "x": -80.0,
+   "y": -72.0,
+   "w": 160.0,
+   "h": 44.0,
+   "def_id": "Patch Embedding",
+   "text": "Linear Projection of\nFlattened Patches",
+   "color": "#F9D9DB",
+   "text_color": "#000000",
+   "font_size": 13,
+   "bold": false,
+   "italic": false,
+   "stack": 0,
+   "border_width": null,
+   "opacity_pct": 100,
+   "stack_dx": 4.0,
+   "stack_dy": -4.0,
+   "stack_fade": true,
+   "order": 1,
+   "parent": null,
+   "layer": 1
+  },
+  {
+   "type": "operator",
+   "uid": 3,
+   "x": -9.0,
+   "y": -114.0,
+   "w": 18.0,
+   "h": 18.0,
+   "def_id": "op_plus",
+   "symbol": "plus",
+   "color": "#FFFFFF",
+   "border_width": null,
+   "order": 2,
+   "parent": null,
+   "layer": 1
+  },
+  {
+   "type": "block",
+   "uid": 4,
+   "x": -225.0,
+   "y": -125.0,
+   "w": 130.0,
+   "h": 40.0,
+   "text": "[class] token +\nPosition Embedding",
+   "color": "#E9E3F3",
+   "text_color": "#000000",
+   "font_size": 13,
+   "bold": false,
+   "italic": false,
+   "stack": 0,
+   "border_width": null,
+   "opacity_pct": 100,
+   "stack_dx": 4.0,
+   "stack_dy": -4.0,
+   "stack_fade": true,
+   "order": 3,
+   "parent": null,
+   "layer": 1
+  },
+  {
+   "type": "group",
+   "uid": 26,
+   "x": -92.0,
+   "y": -453.0,
+   "w": 232.0,
+   "h": 335.0,
+   "label": "L×",
+   "label_pos": "right",
+   "label_size": 15,
+   "fill": "#F2F2F2",
+   "border_style": "solid",
+   "border_width": null,
+   "fit": true,
+   "margin": 12,
+   "margin_top": 14,
+   "margin_bottom": null,
+   "margin_left": null,
+   "margin_right": 30,
+   "order": 12,
+   "parent": null,
+   "layer": 1
+  },
+  {
+   "type": "block",
+   "uid": 27,
+   "x": -80.0,
+   "y": -522.0,
+   "w": 160.0,
+   "h": 44.0,
+   "def_id": "MLP",
+   "text": "MLP Head",
+   "color": "#C6E6F5",
+   "text_color": "#000000",
+   "font_size": 13,
+   "bold": false,
+   "italic": false,
+   "stack": 0,
+   "border_width": null,
+   "opacity_pct": 100,
+   "stack_dx": 4.0,
+   "stack_dy": -4.0,
+   "stack_fade": true,
+   "order": 13,
+   "parent": null,
+   "layer": 1
+  },
+  {
+   "type": "text",
+   "uid": 30,
+   "x": -22.84,
+   "y": -567.0,
+   "w": 45.69,
+   "h": 24.0,
+   "text": "Classe",
+   "font_size": 13,
+   "bold": false,
+   "italic": false,
+   "color": "#000000",
+   "align": "center",
+   "order": 14,
+   "parent": null,
+   "layer": 1
+  },
+  {
+   "type": "text",
+   "uid": 31,
+   "x": -230.38,
+   "y": -318.5,
+   "w": 110.77,
+   "h": 37.0,
+   "text": "Transformer Encoder\n(pre-norm)",
+   "font_size": 11,
+   "bold": false,
+   "italic": true,
+   "color": "#555555",
+   "align": "center",
+   "order": 15,
+   "parent": null,
+   "layer": 1
+  },
+  {
+   "type": "text",
+   "uid": 32,
+   "x": -96.25,
+   "y": 35.5,
+   "w": 192.5,
+   "h": 29.0,
+   "text": "Vision Transformer (ViT)",
+   "font_size": 16,
+   "bold": true,
+   "italic": false,
+   "color": "#000000",
+   "align": "center",
+   "order": 16,
+   "parent": null,
+   "layer": 1
+  },
+  {
+   "type": "text",
+   "uid": 33,
+   "x": -238.58,
+   "y": 62.0,
+   "w": 477.16,
+   "h": 20.0,
+   "text": "Dosovitskiy et al., An image is worth 16×16 words: Transformers for image recognition at scale, ICLR 2021",
+   "font_size": 10,
+   "bold": false,
+   "italic": true,
+   "color": "#555555",
+   "align": "center",
+   "order": 17,
+   "parent": null,
+   "layer": 1
+  },
+  {
+   "type": "junction",
+   "uid": 8,
+   "x": 87.0,
+   "y": 313.0,
+   "w": 10.0,
+   "h": 10.0,
+   "show_dot": false,
+   "order": 4,
+   "parent": 26
+  },
+  {
+   "type": "block",
+   "uid": 9,
+   "x": 12.0,
+   "y": 269.0,
+   "w": 160.0,
+   "h": 28.0,
+   "def_id": "Layer Norm",
+   "text": "Norm",
+   "color": "#F2F5C4",
+   "text_color": "#000000",
+   "font_size": 13,
+   "bold": false,
+   "italic": false,
+   "stack": 0,
+   "border_width": null,
+   "opacity_pct": 100,
+   "stack_dx": 4.0,
+   "stack_dy": -4.0,
+   "stack_fade": true,
+   "order": 5,
+   "parent": 26
+  },
+  {
+   "type": "block",
+   "uid": 10,
+   "x": 12.0,
+   "y": 211.0,
+   "w": 160.0,
+   "h": 44.0,
+   "def_id": "Multi-Head Attention",
+   "text": "Multi-Head\nAttention",
+   "color": "#FCDDB8",
+   "text_color": "#000000",
+   "font_size": 13,
+   "bold": false,
+   "italic": false,
+   "stack": 0,
+   "border_width": null,
+   "opacity_pct": 100,
+   "stack_dx": 4.0,
+   "stack_dy": -4.0,
+   "stack_fade": true,
+   "order": 6,
+   "parent": 26
+  },
+  {
+   "type": "operator",
+   "uid": 11,
+   "x": 83.0,
+   "y": 174.0,
+   "w": 18.0,
+   "h": 18.0,
+   "def_id": "op_plus",
+   "symbol": "plus",
+   "color": "#FFFFFF",
+   "border_width": null,
+   "order": 7,
+   "parent": 26
+  },
+  {
+   "type": "junction",
+   "uid": 12,
+   "x": 87.0,
+   "y": 153.0,
+   "w": 10.0,
+   "h": 10.0,
+   "show_dot": false,
+   "order": 8,
+   "parent": 26
+  },
+  {
+   "type": "block",
+   "uid": 13,
+   "x": 12.0,
+   "y": 109.0,
+   "w": 160.0,
+   "h": 28.0,
+   "def_id": "Layer Norm",
+   "text": "Norm",
+   "color": "#F2F5C4",
+   "text_color": "#000000",
+   "font_size": 13,
+   "bold": false,
+   "italic": false,
+   "stack": 0,
+   "border_width": null,
+   "opacity_pct": 100,
+   "stack_dx": 4.0,
+   "stack_dy": -4.0,
+   "stack_fade": true,
+   "order": 9,
+   "parent": 26
+  },
+  {
+   "type": "block",
+   "uid": 14,
+   "x": 12.0,
+   "y": 51.0,
+   "w": 160.0,
+   "h": 44.0,
+   "def_id": "MLP",
+   "text": "MLP",
+   "color": "#C6E6F5",
+   "text_color": "#000000",
+   "font_size": 13,
+   "bold": false,
+   "italic": false,
+   "stack": 0,
+   "border_width": null,
+   "opacity_pct": 100,
+   "stack_dx": 4.0,
+   "stack_dy": -4.0,
+   "stack_fade": true,
+   "order": 10,
+   "parent": 26
+  },
+  {
+   "type": "operator",
+   "uid": 15,
+   "x": 83.0,
+   "y": 14.0,
+   "w": 18.0,
+   "h": 18.0,
+   "def_id": "op_plus",
+   "symbol": "plus",
+   "color": "#FFFFFF",
+   "border_width": null,
+   "order": 11,
+   "parent": 26
+  }
+ ],
+ "arrows": [
+  {
+   "type": "arrow",
+   "uid": 5,
+   "src": {
+    "x": 0.0,
+    "y": -12.0
+   },
+   "dst": {
+    "node": 2,
+    "fx": 0.5,
+    "fy": 1.0
+   },
+   "style": "straight",
+   "first": "auto",
+   "mid": null,
+   "head": "end",
+   "width": null,
+   "color": "#000000",
+   "dashed": false,
+   "layer": 1
+  },
+  {
+   "type": "arrow",
+   "uid": 6,
+   "src": {
+    "node": 2,
+    "fx": 0.5,
+    "fy": 0.0
+   },
+   "dst": {
+    "node": 3,
+    "fx": 0.5,
+    "fy": 1.0
+   },
+   "style": "straight",
+   "first": "auto",
+   "mid": null,
+   "head": "end",
+   "width": null,
+   "color": "#000000",
+   "dashed": false,
+   "layer": 1
+  },
+  {
+   "type": "arrow",
+   "uid": 7,
+   "src": {
+    "node": 4,
+    "fx": 1.0,
+    "fy": 0.5
+   },
+   "dst": {
+    "node": 3,
+    "fx": 0.0,
+    "fy": 0.5
+   },
+   "style": "straight",
+   "first": "auto",
+   "mid": null,
+   "head": "end",
+   "width": null,
+   "color": "#000000",
+   "dashed": false,
+   "layer": 1
+  },
+  {
+   "type": "arrow",
+   "uid": 16,
+   "src": {
+    "node": 3,
+    "fx": 0.5,
+    "fy": 0.0
+   },
+   "dst": {
+    "node": 8,
+    "fx": 0.5,
+    "fy": 0.5
+   },
+   "style": "straight",
+   "first": "auto",
+   "mid": null,
+   "head": "none",
+   "width": null,
+   "color": "#000000",
+   "dashed": false,
+   "layer": 1
+  },
+  {
+   "type": "arrow",
+   "uid": 17,
+   "src": {
+    "node": 8,
+    "fx": 0.5,
+    "fy": 0.5
+   },
+   "dst": {
+    "node": 9,
+    "fx": 0.5,
+    "fy": 1.0
+   },
+   "style": "straight",
+   "first": "auto",
+   "mid": null,
+   "head": "end",
+   "width": null,
+   "color": "#000000",
+   "dashed": false,
+   "layer": 1
+  },
+  {
+   "type": "arrow",
+   "uid": 18,
+   "src": {
+    "node": 9,
+    "fx": 0.5,
+    "fy": 0.0
+   },
+   "dst": {
+    "node": 10,
+    "fx": 0.5,
+    "fy": 1.0
+   },
+   "style": "straight",
+   "first": "auto",
+   "mid": null,
+   "head": "end",
+   "width": null,
+   "color": "#000000",
+   "dashed": false,
+   "layer": 1
+  },
+  {
+   "type": "arrow",
+   "uid": 19,
+   "src": {
+    "node": 10,
+    "fx": 0.5,
+    "fy": 0.0
+   },
+   "dst": {
+    "node": 11,
+    "fx": 0.5,
+    "fy": 1.0
+   },
+   "style": "straight",
+   "first": "auto",
+   "mid": null,
+   "head": "end",
+   "width": null,
+   "color": "#000000",
+   "dashed": false,
+   "layer": 1
+  },
+  {
+   "type": "arrow",
+   "uid": 20,
+   "src": {
+    "node": 11,
+    "fx": 0.5,
+    "fy": 0.0
+   },
+   "dst": {
+    "node": 12,
+    "fx": 0.5,
+    "fy": 0.5
+   },
+   "style": "straight",
+   "first": "auto",
+   "mid": null,
+   "head": "none",
+   "width": null,
+   "color": "#000000",
+   "dashed": false,
+   "layer": 1
+  },
+  {
+   "type": "arrow",
+   "uid": 21,
+   "src": {
+    "node": 12,
+    "fx": 0.5,
+    "fy": 0.5
+   },
+   "dst": {
+    "node": 13,
+    "fx": 0.5,
+    "fy": 1.0
+   },
+   "style": "straight",
+   "first": "auto",
+   "mid": null,
+   "head": "end",
+   "width": null,
+   "color": "#000000",
+   "dashed": false,
+   "layer": 1
+  },
+  {
+   "type": "arrow",
+   "uid": 22,
+   "src": {
+    "node": 13,
+    "fx": 0.5,
+    "fy": 0.0
+   },
+   "dst": {
+    "node": 14,
+    "fx": 0.5,
+    "fy": 1.0
+   },
+   "style": "straight",
+   "first": "auto",
+   "mid": null,
+   "head": "end",
+   "width": null,
+   "color": "#000000",
+   "dashed": false,
+   "layer": 1
+  },
+  {
+   "type": "arrow",
+   "uid": 23,
+   "src": {
+    "node": 14,
+    "fx": 0.5,
+    "fy": 0.0
+   },
+   "dst": {
+    "node": 15,
+    "fx": 0.5,
+    "fy": 1.0
+   },
+   "style": "straight",
+   "first": "auto",
+   "mid": null,
+   "head": "end",
+   "width": null,
+   "color": "#000000",
+   "dashed": false,
+   "layer": 1
+  },
+  {
+   "type": "arrow",
+   "uid": 24,
+   "src": {
+    "node": 8,
+    "fx": 0.5,
+    "fy": 0.5
+   },
+   "dst": {
+    "node": 11,
+    "fx": 1.0,
+    "fy": 0.5
+   },
+   "style": "ortho2",
+   "first": "h",
+   "mid": 110,
+   "head": "end",
+   "width": null,
+   "color": "#000000",
+   "dashed": false,
+   "layer": 1
+  },
+  {
+   "type": "arrow",
+   "uid": 25,
+   "src": {
+    "node": 12,
+    "fx": 0.5,
+    "fy": 0.5
+   },
+   "dst": {
+    "node": 15,
+    "fx": 1.0,
+    "fy": 0.5
+   },
+   "style": "ortho2",
+   "first": "h",
+   "mid": 110,
+   "head": "end",
+   "width": null,
+   "color": "#000000",
+   "dashed": false,
+   "layer": 1
+  },
+  {
+   "type": "arrow",
+   "uid": 28,
+   "src": {
+    "node": 15,
+    "fx": 0.5,
+    "fy": 0.0
+   },
+   "dst": {
+    "node": 27,
+    "fx": 0.5,
+    "fy": 1.0
+   },
+   "style": "straight",
+   "first": "auto",
+   "mid": null,
+   "head": "end",
+   "width": null,
+   "color": "#000000",
+   "dashed": false,
+   "layer": 1
+  },
+  {
+   "type": "arrow",
+   "uid": 29,
+   "src": {
+    "node": 27,
+    "fx": 0.5,
+    "fy": 0.0
+   },
+   "dst": {
+    "x": 0.0,
+    "y": -540.0
+   },
+   "style": "straight",
+   "first": "auto",
+   "mid": null,
+   "head": "end",
+   "width": null,
+   "color": "#000000",
+   "dashed": false,
+   "layer": 1
+  }
+ ],
+ "settings": {
+  "border_width": 1.6,
+  "arrow_width": 1.6
+ },
+ "layers": [
+  {
+   "id": 1,
+   "name": "Calque 1",
+   "visible": true,
+   "locked": false,
+   "opacity": 1.0
+  }
+ ]
+}

@@ -1,0 +1,759 @@
+# =============================================================================
+#  DeepGraph — bibliothèque de blocs
+# =============================================================================
+#  Ce fichier est relu automatiquement dès qu'il est enregistré (ou avec F5).
+#
+#  Section « style »  : apparence globale (toutes les clés sont optionnelles).
+#  Section « blocks » : un dictionnaire par bloc. Champs disponibles :
+#
+#     name         (obligatoire) nom affiché dans la bibliothèque
+#     color        couleur de remplissage "#RRGGBB"                 (défaut "#FFFFFF")
+#     description  texte d'aide. 1re ligne = résumé (bibliothèque) ; le texte complet
+#                  s'affiche dans Propriétés quand on clique sur le bloc.
+#                  Plusieurs lignes : « description: | » puis le texte indenté en dessous
+#     category     catégorie = dossier dans la bibliothèque          (défaut "Divers")
+#     label        texte écrit dans le bloc (défaut = name). Le texte passe à la ligne
+#                  tout seul si le bloc est trop étroit ; "\n" force un retour à la ligne
+#     width        largeur en px   (défaut : style.block_width)
+#     height       hauteur en px   (défaut : style.block_height)
+#     font_size    taille du texte en px
+#     text_color   couleur du texte
+#     bold         true / false
+#     stack        nombre de copies empilées derrière le bloc (effet « ×h » du Multi-Head)
+#     shape        "rect" (défaut) ou "circle" (opérateur)
+#     symbol       pour les cercles :
+#                    concat  croix qui touche le cercle      (concaténation)
+#                    plus    croix qui ne touche pas le cercle (addition)
+#                    minus   trait horizontal                 (différence)
+#                    times   croix en X                       (multiplication)
+#                    dot     point central                    (produit terme à terme)
+#                  ou n'importe quel texte court (ex. "σ", "C")
+#     id           identifiant unique (défaut = name) ; utile si deux blocs ont le même nom
+#
+#  Les épaisseurs border_width / arrow_width ci-dessous sont les valeurs par défaut
+#  des nouveaux diagrammes ; elles se règlent ensuite dans la barre d'outils.
+#
+#  Les blocs déjà posés gardent leur couleur ; menu Configuration >
+#  « Réappliquer les couleurs de la config » pour les mettre à jour.
+# =============================================================================
+
+style:
+  font: [Helvetica, Nimbus Sans, Arial, Liberation Sans, DejaVu Sans]
+  font_size: 13            # px
+  text_color: "#000000"
+  border_color: "#2B2B2B"
+  border_width: 1.6       # épaisseur des bords (défaut des nouveaux diagrammes)
+  corner_radius: 5
+  block_width: 110
+  block_height: 28
+  operator_size: 18
+  arrow_color: "#000000"
+  arrow_width: 1.6        # épaisseur des flèches (idem)
+  arrow_head_length: 8
+  arrow_head_width: 6.5
+  arrow_corner_radius: 6   # arrondi des coudes des flèches (0 = angle vif)
+  group_fill: "#F2F2F2"
+  group_corner_radius: 12
+  group_padding: 15
+  group_label_size: 15
+  grid_size: 5
+
+blocks:
+  # ------------------------------------------------------- Entrée / Sortie
+  - name: Input
+    color: "#F0F0F0"
+    category: Entrée / Sortie
+    description: |
+      Entrée du réseau : données brutes ou prétraitées (image, séquence de tokens, signal…).
+      Préciser la forme du tenseur, ex. x ∈ ℝ^(B×C×H×W) (images) ou ℝ^(B×T×d) (séquences).
+
+  - name: Output
+    color: "#F0F0F0"
+    category: Entrée / Sortie
+    description: |
+      Sortie du réseau : prédiction, logits, reconstruction…
+      Ex. logits z ∈ ℝ^K pour K classes, transformés en probabilités par une Softmax.
+
+  - name: Embedding
+    color: "#F9D9DB"
+    category: Entrée / Sortie
+    description: |
+      Table de correspondance apprise : chaque indice discret (token, classe) est associé à un vecteur.
+      Formule : e = E[i], E ∈ ℝ^(V×d) (V = taille du vocabulaire, d = dimension) ; équivaut à une couche linéaire appliquée à un vecteur one-hot.
+      Réf. : Bengio et al., « A Neural Probabilistic Language Model », JMLR 2003 ; Mikolov et al., « Efficient Estimation of Word Representations in Vector Space » (word2vec), 2013.
+
+  - name: Positional Encoding
+    color: "#E9E3F3"
+    height: 44
+    category: Entrée / Sortie
+    description: |
+      Injecte la position de chaque élément dans une architecture sans récurrence (Transformer) ; ajouté aux embeddings.
+      Sinusoïdal : PE(pos, 2i) = sin(pos / 10000^(2i/d)), PE(pos, 2i+1) = cos(pos / 10000^(2i/d)).
+      Variantes : appris (BERT, ViT), relatif (Shaw et al., 2018), rotatif RoPE (Su et al., 2021).
+      Réf. : Vaswani et al., « Attention Is All You Need », NeurIPS 2017.
+
+  - name: Patch Embedding
+    color: "#F9D9DB"
+    height: 44
+    category: Entrée / Sortie
+    description: |
+      Découpe l'image en patchs P×P non chevauchants, aplatis puis projetés linéairement (en pratique une Conv de noyau P et de pas P).
+      Formule : x ∈ ℝ^(H×W×C) → N = HW/P² tokens, zᵢ = E · vec(xᵢ) + E_pos ; un token [CLS] est souvent ajouté.
+      Réf. : Dosovitskiy et al., « An Image is Worth 16x16 Words » (ViT), ICLR 2021.
+
+  # ----------------------------------------------------------- Dense / MLP
+  - name: Linear
+    color: "#DCDDF2"
+    height: 22
+    category: Dense / MLP
+    description: |
+      Couche entièrement connectée (dense, fully connected) : transformation affine apprise.
+      Formule : y = Wx + b, W ∈ ℝ^(d_out×d_in), b ∈ ℝ^(d_out) ; d_in·d_out + d_out paramètres.
+      Réf. : Rosenblatt, « The Perceptron », Psychological Review 1958.
+
+  - name: MLP
+    color: "#C6E6F5"
+    height: 44
+    category: Dense / MLP
+    description: |
+      Perceptron multicouche : couches linéaires séparées par des non-linéarités.
+      Formule : h = σ(W₁x + b₁), y = W₂h + b₂ (répété pour plus de couches).
+      Approximateur universel (Cybenko 1989 ; Hornik 1991).
+      Réf. : Rumelhart, Hinton & Williams, « Learning Representations by Back-propagating Errors », Nature 1986.
+
+  - name: Feed Forward
+    color: "#C6E6F5"
+    height: 44
+    category: Dense / MLP
+    description: |
+      Sous-couche position par position du Transformer : le même MLP à deux couches est appliqué indépendamment à chaque token.
+      Formule : FFN(x) = max(0, xW₁ + b₁)W₂ + b₂, avec d_ff = 4·d_model (2048 pour d_model = 512) ; variantes modernes : GELU, SwiGLU.
+      Réf. : Vaswani et al., « Attention Is All You Need », NeurIPS 2017.
+
+  - name: Dropout
+    color: "#EDEDED"
+    category: Dense / MLP
+    description: |
+      Régularisation : à l'entraînement, chaque activation est mise à zéro avec une probabilité p ; à l'inférence, le bloc est l'identité.
+      Formule (inverted dropout) : y = m ⊙ x / (1 − p), mᵢ ~ Bernoulli(1 − p).
+      Réf. : Hinton et al., « Improving Neural Networks by Preventing Co-adaptation of Feature Detectors », 2012 ; Srivastava et al., « Dropout », JMLR 2014.
+
+  - name: Flatten
+    color: "#EDEDED"
+    category: Dense / MLP
+    description: |
+      Aplatit un tenseur multidimensionnel en vecteur (hors dimension batch), typiquement entre la partie convolutive et les couches denses.
+      Forme : (B, C, H, W) → (B, C·H·W).
+
+  # ----------------------------------------------------------- Convolution
+  - name: Conv1D
+    color: "#CFE8CC"
+    category: Convolution
+    description: |
+      Convolution sur une dimension (séquences, séries temporelles, audio).
+      Formule : y[o, t] = b[o] + Σᵢ Σₖ w[o, i, k] · x[i, s·t + d·k − p] (s = pas, d = dilatation, p = padding).
+      Longueur de sortie : ⌊(L + 2p − d(K − 1) − 1)/s⌋ + 1.
+      Réf. : Waibel et al., « Phoneme Recognition Using Time-Delay Neural Networks », 1989 ; version causale dilatée : van den Oord et al., « WaveNet », 2016.
+
+  - name: Conv2D
+    color: "#CFE8CC"
+    category: Convolution
+    description: |
+      Convolution 2D (images) : un filtre K×K glisse sur la carte de caractéristiques ; poids partagés, équivariance par translation.
+      Formule : y[o, i, j] = b[o] + Σ_c Σ_(u,v) w[o, c, u, v] · x[c, s·i + u, s·j + v] ; C_out·C_in·K² + C_out paramètres.
+      Réf. : LeCun et al., « Backpropagation Applied to Handwritten Zip Code Recognition », 1989 ; LeCun et al., « Gradient-Based Learning Applied to Document Recognition » (LeNet-5), 1998.
+
+  - name: Conv3D
+    color: "#CFE8CC"
+    category: Convolution
+    description: |
+      Convolution 3D : le noyau K×K×K glisse en profondeur (ou dans le temps) et en espace ; volumes médicaux, vidéo.
+      Formule : y[o, t, i, j] = b[o] + Σ_c Σ_(τ,u,v) w[o, c, τ, u, v] · x[c, t + τ, i + u, j + v].
+      Réf. : Ji et al., « 3D Convolutional Neural Networks for Human Action Recognition », TPAMI 2013 ; Tran et al., « C3D », ICCV 2015 ; Çiçek et al., « 3D U-Net », MICCAI 2016.
+
+  - name: Conv 3×3
+    color: "#CFE8CC"
+    category: Convolution
+    description: |
+      Convolution à noyau 3×3 : brique de base des CNN modernes.
+      Deux 3×3 empilées couvrent un champ récepteur 5×5 avec moins de paramètres (18C² au lieu de 25C²) et une non-linéarité de plus.
+      Réf. : Simonyan & Zisserman, « Very Deep Convolutional Networks for Large-Scale Image Recognition » (VGG), ICLR 2015.
+
+  - name: Conv 1×1
+    color: "#CFE8CC"
+    category: Convolution
+    description: |
+      Convolution 1×1 (pointwise) : combinaison linéaire des canaux à chaque position, sans mélange spatial ; réduit ou augmente le nombre de canaux.
+      Formule : y[:, i, j] = W · x[:, i, j] + b, W ∈ ℝ^(C_out×C_in).
+      Réf. : Lin, Chen & Yan, « Network In Network », ICLR 2014 ; reprise dans GoogLeNet (Szegedy et al., CVPR 2015) et les bottlenecks de ResNet.
+
+  - name: Transposed Conv
+    color: "#BFE0C5"
+    category: Convolution
+    description: |
+      Convolution transposée (parfois appelée à tort « déconvolution ») : suréchantillonnage appris, transposée d'une convolution de pas s.
+      Taille de sortie : (L − 1)·s − 2p + d(K − 1) + p_out + 1 ; peut créer des artefacts en damier.
+      Réf. : Zeiler et al., « Deconvolutional Networks », CVPR 2010 ; Long, Shelhamer & Darrell, « Fully Convolutional Networks », CVPR 2015 ; Dumoulin & Visin, « A Guide to Convolution Arithmetic for Deep Learning », 2016.
+
+  - name: Depthwise Conv
+    color: "#DDEFD6"
+    category: Convolution
+    description: |
+      Convolution en profondeur : un filtre K×K par canal (groups = C), sans mélange entre canaux. Suivie d'une Conv 1×1 : convolution séparable en profondeur.
+      Paramètres : C·K² + C·C_out au lieu de C·C_out·K².
+      Réf. : Sifre, thèse, 2014 ; Chollet, « Xception », CVPR 2017 ; Howard et al., « MobileNets », 2017.
+
+  - name: Max Pooling
+    color: "#E4E4E4"
+    category: Convolution
+    description: |
+      Sous-échantillonnage : garde le maximum de chaque fenêtre k×k (souvent k = 2, pas 2 → résolution divisée par 2) ; sans paramètres.
+      Formule : y[c, i, j] = max_(u,v) x[c, s·i + u, s·j + v].
+      Réf. : Ranzato et al., CVPR 2007 ; popularisé par Krizhevsky, Sutskever & Hinton (AlexNet), NeurIPS 2012.
+
+  - name: Avg Pooling
+    color: "#E4E4E4"
+    category: Convolution
+    description: |
+      Sous-échantillonnage par moyenne sur chaque fenêtre k×k ; la version globale (Global Average Pooling) donne une valeur par canal avant le classifieur.
+      Formule : y[c, i, j] = (1/k²) Σ_(u,v) x[c, s·i + u, s·j + v].
+      Réf. : LeCun et al., 1998 (sous-échantillonnage de LeNet) ; GAP : Lin, Chen & Yan, « Network In Network », ICLR 2014.
+
+  - name: Upsample
+    color: "#D6E6F7"
+    category: Convolution
+    description: |
+      Suréchantillonnage sans paramètres d'un facteur r (plus proche voisin, bilinéaire, bicubique), souvent suivi d'une convolution.
+      Forme : (C, H, W) → (C, rH, rW) ; variante apprise : PixelShuffle (Shi et al., « ESPCN », CVPR 2016).
+      Réf. : Odena, Dumoulin & Olah, « Deconvolution and Checkerboard Artifacts », Distill 2016.
+
+  # --------------------------------------------------------- Normalisation
+  - name: Batch Norm
+    color: "#F2F5C4"
+    category: Normalisation
+    description: |
+      Normalise chaque canal avec la moyenne et la variance du batch (et des dimensions spatiales), puis applique une transformation affine apprise.
+      Formule : x_norm = (x − μ_B) / √(σ²_B + ε), y = γ·x_norm + β ; en inférence, moyennes glissantes des statistiques. Sensible aux petits batchs.
+      Réf. : Ioffe & Szegedy, « Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift », ICML 2015.
+
+  - name: Layer Norm
+    color: "#F2F5C4"
+    category: Normalisation
+    description: |
+      Normalise chaque exemple (chaque token) sur ses d features, indépendamment du batch ; standard dans les Transformers et les RNN.
+      Formule : μ = (1/d) Σᵢ xᵢ, σ² = (1/d) Σᵢ (xᵢ − μ)², y = γ ⊙ (x − μ)/√(σ² + ε) + β.
+      Réf. : Ba, Kiros & Hinton, « Layer Normalization », 2016.
+
+  - name: Group Norm
+    color: "#F2F5C4"
+    category: Normalisation
+    description: |
+      Répartit les canaux en G groupes et normalise chaque groupe (par exemple, sur les dimensions spatiales) ; indépendant de la taille du batch.
+      Formule : x_norm = (x − μ_g)/√(σ²_g + ε), y = γ·x_norm + β, statistiques sur (C/G)·H·W valeurs ; G = 1 → Layer Norm, G = C → Instance Norm (souvent G = 32).
+      Réf. : Wu & He, « Group Normalization », ECCV 2018.
+
+  - name: Instance Norm
+    color: "#F2F5C4"
+    category: Normalisation
+    description: |
+      Normalise chaque canal de chaque exemple séparément (sur H×W) : retire le contraste propre à l'image ; transfert de style, segmentation médicale (nnU-Net).
+      Formule : y_(n,c) = γ_c (x_(n,c) − μ_(n,c)) / √(σ²_(n,c) + ε) + β_c.
+      Réf. : Ulyanov, Vedaldi & Lempitsky, « Instance Normalization: The Missing Ingredient for Fast Stylization », 2016.
+
+  - name: RMS Norm
+    color: "#F2F5C4"
+    category: Normalisation
+    description: |
+      Layer Norm simplifiée : pas de centrage, seulement une mise à l'échelle par la moyenne quadratique ; plus rapide (T5, LLaMA…).
+      Formule : RMS(x) = √((1/d) Σᵢ xᵢ² + ε), y = γ ⊙ x / RMS(x).
+      Réf. : Zhang & Sennrich, « Root Mean Square Layer Normalization », NeurIPS 2019.
+
+  - name: AdaIN
+    color: "#F2F5C4"
+    category: Normalisation
+    description: |
+      Adaptive Instance Normalization : normalise le contenu x par instance puis lui impose la moyenne et l'écart-type d'un style y (ou d'un conditionnement).
+      Formule : AdaIN(x, y) = σ(y) · (x − μ(x))/σ(x) + μ(y).
+      Réf. : Huang & Belongie, « Arbitrary Style Transfer in Real-time with Adaptive Instance Normalization », ICCV 2017 ; repris dans StyleGAN (Karras et al., CVPR 2019).
+
+  - name: AdaLN
+    color: "#F2F5C4"
+    category: Normalisation
+    description: |
+      Adaptive Layer Norm : γ et β de la Layer Norm sont prédits à partir d'un conditionnement c (pas de diffusion, classe…) ; variante adaLN-Zero avec une porte α initialisée à 0.
+      Formule : y = (1 + γ(c)) ⊙ LN(x) + β(c).
+      Réf. : principe FiLM, Perez et al., AAAI 2018 ; Peebles & Xie, « Scalable Diffusion Models with Transformers » (DiT), ICCV 2023.
+
+  - name: Weight Norm
+    color: "#F2F5C4"
+    category: Normalisation
+    description: |
+      Reparamétrisation des poids : sépare la norme et la direction de chaque vecteur de poids, ce qui conditionne mieux l'optimisation (sans statistiques de batch).
+      Formule : w = g · v / ‖v‖ (g scalaire appris, v vecteur appris).
+      Réf. : Salimans & Kingma, « Weight Normalization », NeurIPS 2016.
+
+  - name: Spectral Norm
+    color: "#F2F5C4"
+    category: Normalisation
+    description: |
+      Divise la matrice de poids par sa plus grande valeur singulière (estimée par itération de la puissance) : la couche devient 1-lipschitzienne ; stabilise les discriminateurs de GAN.
+      Formule : W_SN = W / σ(W), σ(W) = max_(‖h‖=1) ‖Wh‖₂.
+      Réf. : Miyato et al., « Spectral Normalization for Generative Adversarial Networks », ICLR 2018.
+
+  - name: L2 Norm
+    color: "#F2F5C4"
+    category: Normalisation
+    description: |
+      Projette chaque vecteur sur la sphère unité (embeddings, similarité cosinus, apprentissage contrastif).
+      Formule : y = x / max(‖x‖₂, ε), ‖x‖₂ = √(Σᵢ xᵢ²).
+      Réf. : ex. Schroff et al., « FaceNet », CVPR 2015 ; Chen et al., « SimCLR », ICML 2020.
+
+  - name: Local Response Norm
+    color: "#F2F5C4"
+    category: Normalisation
+    description: |
+      Normalisation par « inhibition latérale » entre n canaux voisins ; abandonnée au profit de la Batch Norm.
+      Formule : b_c = a_c / (k + α Σ_(c' voisins) a_c'²)^β (AlexNet : n = 5, k = 2, α = 10⁻⁴, β = 0,75).
+      Réf. : Krizhevsky, Sutskever & Hinton, « ImageNet Classification with Deep Convolutional Neural Networks » (AlexNet), NeurIPS 2012.
+
+  # ----------------------------------------------------------- Activations
+  - name: Activation
+    color: "#FFE3C4"
+    category: Activations
+    description: |
+      Non-linéarité générique appliquée élément par élément : y = σ(x) ; renommer le bloc avec la fonction utilisée.
+      Sans non-linéarité, un empilement de couches linéaires reste une seule application linéaire.
+
+  - name: ReLU
+    color: "#FFE3C4"
+    width: 80
+    category: Activations
+    description: |
+      Rectified Linear Unit : la plus utilisée ; gradient 1 pour x > 0 (limite l'évanouissement du gradient), très peu coûteuse ; risque de neurones « morts ».
+      Formule : ReLU(x) = max(0, x).
+      Réf. : Nair & Hinton, « Rectified Linear Units Improve Restricted Boltzmann Machines », ICML 2010 ; Glorot, Bordes & Bengio, « Deep Sparse Rectifier Neural Networks », AISTATS 2011.
+
+  - name: Leaky ReLU
+    color: "#FFE3C4"
+    width: 80
+    category: Activations
+    description: |
+      ReLU avec une petite pente pour x < 0, pour éviter les neurones morts.
+      Formule : f(x) = x si x ≥ 0, αx sinon (α ≈ 0,01 ; 0,2 dans les GAN).
+      Réf. : Maas, Hannun & Ng, « Rectifier Nonlinearities Improve Neural Network Acoustic Models », ICML 2013.
+
+  - name: PReLU
+    color: "#FFE3C4"
+    width: 80
+    category: Activations
+    description: |
+      Parametric ReLU : la pente négative a est apprise (une par canal ou partagée).
+      Formule : f(x) = x si x ≥ 0, a·x sinon.
+      Réf. : He et al., « Delving Deep into Rectifiers », ICCV 2015 (qui introduit aussi l'initialisation He/Kaiming).
+
+  - name: ELU
+    color: "#FFE3C4"
+    width: 80
+    category: Activations
+    description: |
+      Exponential Linear Unit : partie négative lisse et saturante ; sorties de moyenne plus proche de 0.
+      Formule : f(x) = x si x > 0, α(eˣ − 1) sinon (α = 1).
+      Réf. : Clevert, Unterthiner & Hochreiter, « Fast and Accurate Deep Network Learning by Exponential Linear Units », ICLR 2016.
+
+  - name: SELU
+    color: "#FFE3C4"
+    width: 80
+    category: Activations
+    description: |
+      Scaled ELU : avec l'initialisation LeCun (et l'AlphaDropout), les activations tendent vers moyenne 0 et variance 1 (réseau auto-normalisant).
+      Formule : f(x) = λx si x > 0, λα(eˣ − 1) sinon, λ ≈ 1,0507, α ≈ 1,6733.
+      Réf. : Klambauer et al., « Self-Normalizing Neural Networks », NeurIPS 2017.
+
+  - name: GELU
+    color: "#FFE3C4"
+    width: 80
+    category: Activations
+    description: |
+      Gaussian Error Linear Unit : pondère x par la probabilité qu'une gaussienne standard lui soit inférieure ; standard dans BERT, GPT, ViT.
+      Formule : GELU(x) = x·Φ(x) ≈ 0,5x(1 + tanh(√(2/π)(x + 0,044715x³))).
+      Réf. : Hendrycks & Gimpel, « Gaussian Error Linear Units (GELUs) », 2016.
+
+  - name: SiLU / Swish
+    color: "#FFE3C4"
+    width: 80
+    category: Activations
+    description: |
+      Sigmoid Linear Unit / Swish : lisse et non monotone ; EfficientNet, U-Net de diffusion, LLaMA (via SwiGLU).
+      Formule : SiLU(x) = x·σ(x) = x / (1 + e⁻ˣ) ; Swish_β(x) = x·σ(βx).
+      Réf. : Hendrycks & Gimpel, 2016 ; Elfwing, Uchibe & Doya, Neural Networks 2018 ; Ramachandran, Zoph & Le, « Searching for Activation Functions », 2017.
+
+  - name: Mish
+    color: "#FFE3C4"
+    width: 80
+    category: Activations
+    description: |
+      Activation lisse et non monotone, proche de Swish ; utilisée dans YOLOv4.
+      Formule : Mish(x) = x·tanh(softplus(x)) = x·tanh(ln(1 + eˣ)).
+      Réf. : Misra, « Mish: A Self Regularized Non-Monotonic Activation Function », BMVC 2020.
+
+  - name: Sigmoid
+    color: "#FFE3C4"
+    width: 80
+    category: Activations
+    description: |
+      Fonction logistique : envoie ℝ dans ]0, 1[ ; sortie pour une probabilité binaire ou multi-label, portes des LSTM/GRU ; sature (gradient ≤ 0,25).
+      Formule : σ(x) = 1 / (1 + e⁻ˣ), σ'(x) = σ(x)(1 − σ(x)).
+
+  - name: Tanh
+    color: "#FFE3C4"
+    width: 80
+    category: Activations
+    description: |
+      Tangente hyperbolique : sortie dans ]−1, 1[, centrée en 0 ; classique dans les RNN et LSTM.
+      Formule : tanh(x) = (eˣ − e⁻ˣ)/(eˣ + e⁻ˣ) = 2σ(2x) − 1.
+      Réf. : LeCun et al., « Efficient BackProp », 1998.
+
+  - name: Hard Sigmoid
+    color: "#FFE3C4"
+    width: 80
+    category: Activations
+    description: |
+      Approximation linéaire par morceaux de la sigmoïde, peu coûteuse (mobile, quantification).
+      Formule : f(x) = max(0, min(1, (x + 3)/6)) (version MobileNetV3 / PyTorch).
+      Réf. : Courbariaux, Bengio & David, « BinaryConnect », NeurIPS 2015 ; Howard et al., « Searching for MobileNetV3 », ICCV 2019.
+
+  - name: Hard Swish
+    color: "#FFE3C4"
+    width: 80
+    category: Activations
+    description: |
+      Approximation peu coûteuse de Swish.
+      Formule : h-swish(x) = x · ReLU6(x + 3)/6, ReLU6(x) = min(max(0, x), 6).
+      Réf. : Howard et al., « Searching for MobileNetV3 », ICCV 2019.
+
+  - name: Softplus
+    color: "#FFE3C4"
+    width: 80
+    category: Activations
+    description: |
+      Version lisse de ReLU, toujours positive ; sert aussi à garantir une sortie > 0 (écart-type, variance).
+      Formule : softplus(x) = (1/β) ln(1 + e^(βx)) ; sa dérivée est σ(βx).
+      Réf. : Dugas et al., « Incorporating Second-Order Functional Knowledge for Better Option Pricing », NeurIPS 2000.
+
+  - name: GLU
+    color: "#FFE3C4"
+    width: 80
+    category: Activations
+    description: |
+      Gated Linear Unit : une projection de l'entrée sert de porte multiplicative à une autre.
+      Formule : GLU(x) = (xW + b) ⊗ σ(xV + c).
+      Réf. : Dauphin et al., « Language Modeling with Gated Convolutional Networks », ICML 2017.
+
+  - name: SwiGLU
+    color: "#FFE3C4"
+    width: 80
+    category: Activations
+    description: |
+      GLU dont la porte utilise Swish ; remplace le FFN à ReLU dans PaLM, LLaMA…
+      Formule : FFN_SwiGLU(x) = (Swish(xW) ⊗ xV) W₂ (d_ff souvent ramené à ⅔·4d pour garder le même nombre de paramètres).
+      Réf. : Shazeer, « GLU Variants Improve Transformer », 2020.
+
+  - name: Softmax
+    color: "#CFEBD2"
+    height: 22
+    category: Activations
+    description: |
+      Transforme un vecteur de scores (logits) en distribution de probabilité ; sortie des classifieurs multi-classes, cœur de l'attention.
+      Formule : softmax(z)ᵢ = e^(zᵢ/T) / Σⱼ e^(zⱼ/T) (T = température, 1 par défaut).
+      Réf. : Bridle, « Probabilistic Interpretation of Feedforward Classification Network Outputs », 1990.
+
+  # ------------------------------------------------------------- Attention
+  - name: Self-Attention
+    color: "#FCDDB8"
+    height: 44
+    category: Attention
+    description: |
+      Chaque élément d'une séquence agrège l'information de tous les autres ; Q, K et V proviennent de la même séquence X.
+      Formule : Q = XW_Q, K = XW_K, V = XW_V, SA(X) = softmax(QKᵀ/√d_k) V ; coût O(n²·d) pour une longueur n.
+      Réf. : Cheng, Dong & Lapata, « Long Short-Term Memory-Networks for Machine Reading », EMNLP 2016 ; Vaswani et al., « Attention Is All You Need », NeurIPS 2017.
+
+  - name: Cross-Attention
+    color: "#FCDDB8"
+    height: 44
+    category: Attention
+    description: |
+      Attention entre deux séquences : les requêtes viennent de X, les clés et valeurs d'une autre source Y (encodeur, texte de conditionnement…).
+      Formule : Q = XW_Q, K = YW_K, V = YW_V, CA(X, Y) = softmax(QKᵀ/√d_k) V.
+      Réf. : Bahdanau, Cho & Bengio, « Neural Machine Translation by Jointly Learning to Align and Translate », ICLR 2015 ; Vaswani et al., NeurIPS 2017 ; Rombach et al., « High-Resolution Image Synthesis with Latent Diffusion Models », CVPR 2022.
+
+  - name: Multi-Head Attention
+    color: "#FCDDB8"
+    height: 44
+    category: Attention
+    description: |
+      h attentions en parallèle sur des projections différentes de Q, K, V, puis concaténation et projection : chaque tête peut se spécialiser.
+      Formule : headᵢ = Attention(QW_Qⁱ, KW_Kⁱ, VW_Vⁱ), MHA(Q, K, V) = Concat(head₁, …, head_h) W_O, avec d_k = d_model/h (h = 8, d_model = 512 dans l'article).
+      Réf. : Vaswani et al., « Attention Is All You Need », NeurIPS 2017.
+
+  - name: Masked Multi-Head Attention
+    label: "Masked\nMulti-Head\nAttention"
+    color: "#FCDDB8"
+    height: 56
+    category: Attention
+    description: |
+      Attention multi-têtes causale : chaque position ne voit que les positions précédentes (décodeur, génération auto-régressive, GPT).
+      Formule : softmax(QKᵀ/√d_k + M) V, avec M_ij = 0 si j ≤ i, −∞ sinon.
+      Réf. : Vaswani et al., NeurIPS 2017 ; Radford et al., « Improving Language Understanding by Generative Pre-Training » (GPT), 2018.
+
+  - name: Scaled Dot-Product Attention
+    color: "#CBC1E6"
+    width: 180
+    height: 44
+    stack: 2
+    category: Attention
+    description: |
+      Cœur de l'attention : similarité requête–clé par produit scalaire, mise à l'échelle par √d_k (évite la saturation de la softmax), puis moyenne pondérée des valeurs.
+      Formule : Attention(Q, K, V) = softmax(QKᵀ / √d_k) V.
+      Réf. : Vaswani et al., « Attention Is All You Need », NeurIPS 2017 (figure 2).
+
+  # ------------------------------------------------------------- Récurrent
+  - name: RNN
+    color: "#CDEBE6"
+    category: Récurrent
+    description: |
+      Réseau récurrent simple (Elman) : un état caché hₜ résume la séquence jusqu'à t ; souffre de l'évanouissement / explosion du gradient sur les longues séquences.
+      Formule : hₜ = tanh(W_x xₜ + W_h hₜ₋₁ + b), yₜ = W_y hₜ.
+      Réf. : Elman, « Finding Structure in Time », Cognitive Science 1990 ; Bengio, Simard & Frasconi, « Learning Long-Term Dependencies with Gradient Descent is Difficult », 1994.
+
+  - name: LSTM
+    color: "#CDEBE6"
+    category: Récurrent
+    description: |
+      Long Short-Term Memory : une cellule mémoire cₜ contrôlée par trois portes (oubli f, entrée i, sortie o) conserve l'information et le gradient sur de longues séquences.
+      Formules : fₜ = σ(W_f[hₜ₋₁, xₜ] + b_f), iₜ = σ(W_i[hₜ₋₁, xₜ] + b_i), oₜ = σ(W_o[hₜ₋₁, xₜ] + b_o), gₜ = tanh(W_g[hₜ₋₁, xₜ] + b_g) (cellule candidate)
+      cₜ = fₜ ⊙ cₜ₋₁ + iₜ ⊙ gₜ, hₜ = oₜ ⊙ tanh(cₜ).
+      Réf. : Hochreiter & Schmidhuber, « Long Short-Term Memory », Neural Computation 1997 ; porte d'oubli : Gers, Schmidhuber & Cummins, 2000.
+
+  - name: GRU
+    color: "#CDEBE6"
+    category: Récurrent
+    description: |
+      Gated Recurrent Unit : LSTM simplifié à deux portes (mise à jour z, réinitialisation r), sans cellule séparée.
+      Formules : zₜ = σ(W_z xₜ + U_z hₜ₋₁), rₜ = σ(W_r xₜ + U_r hₜ₋₁), nₜ = tanh(W_n xₜ + U_n(rₜ ⊙ hₜ₋₁)) (état candidat), hₜ = (1 − zₜ) ⊙ hₜ₋₁ + zₜ ⊙ nₜ.
+      Réf. : Cho et al., « Learning Phrase Representations using RNN Encoder–Decoder for Statistical Machine Translation », EMNLP 2014.
+
+  - name: BiLSTM
+    color: "#B9E0D9"
+    category: Récurrent
+    description: |
+      Deux LSTM parcourent la séquence dans les deux sens ; leurs états sont concaténés à chaque pas : le contexte passé et futur est disponible.
+      Formule : hₜ = [h→ₜ ; h←ₜ].
+      Réf. : Schuster & Paliwal, « Bidirectional Recurrent Neural Networks », IEEE TSP 1997 ; Graves & Schmidhuber, Neural Networks 2005.
+
+  # ------------------------------------------------------------- Génératif
+  - name: Encoder
+    color: "#D6E6F7"
+    height: 44
+    category: Génératif
+    description: |
+      Encodeur : compresse l'entrée en une représentation latente z = f(x), souvent de plus petite dimension ; dans un VAE, il prédit une loi q_φ(z|x) = 𝒩(μ(x), diag σ²(x)).
+      Réf. : Hinton & Salakhutdinov, « Reducing the Dimensionality of Data with Neural Networks », Science 2006 ; Kingma & Welling, « Auto-Encoding Variational Bayes », ICLR 2014.
+
+  - name: Decoder
+    color: "#E3DAF2"
+    height: 44
+    category: Génératif
+    description: |
+      Décodeur : reconstruit ou génère une donnée à partir d'une représentation latente, x' = g(z) ; dans un VAE, il modélise p_θ(x|z).
+      Autoencodeur : perte ‖x − g(f(x))‖² ; VAE : ELBO = 𝔼_q[log p_θ(x|z)] − KL(q_φ(z|x) ‖ p(z)).
+      Réf. : Kingma & Welling, « Auto-Encoding Variational Bayes », ICLR 2014.
+
+  - name: Bottleneck
+    color: "#EFE6D2"
+    category: Génératif
+    description: |
+      Goulot d'étranglement : représentation la plus compacte du réseau (latent d'un autoencodeur, fond du « U » d'un U-Net). Désigne aussi le bloc résiduel 1×1 → 3×3 → 1×1 de ResNet, qui réduit puis restaure les canaux.
+      Réf. : Hinton & Salakhutdinov, Science 2006 ; Ronneberger, Fischer & Brox, « U-Net », MICCAI 2015 ; He et al., « Deep Residual Learning for Image Recognition », CVPR 2016.
+
+  - name: Denoising
+    color: "#D9EEDB"
+    height: 44
+    category: Génératif
+    description: |
+      Réseau de débruitage d'un modèle de diffusion : à partir de xₜ bruité et du pas t, il prédit le bruit ε (ou x₀, ou v) ; souvent un U-Net ou un Transformer (DiT).
+      Bruitage : xₜ = √ᾱₜ x₀ + √(1 − ᾱₜ) ε, ε ~ 𝒩(0, I) ; perte : 𝔼‖ε − ε_θ(xₜ, t)‖².
+      Réf. : Sohl-Dickstein et al., ICML 2015 ; Ho, Jain & Abbeel, « Denoising Diffusion Probabilistic Models », NeurIPS 2020 ; autoencodeur débruiteur : Vincent et al., ICML 2008.
+
+  - name: Noise
+    color: "#EDEDED"
+    category: Génératif
+    description: |
+      Source de bruit aléatoire : entrée d'un générateur, ou bruit ajouté aux données (diffusion, augmentation, autoencodeur débruiteur).
+      Formule : z ~ 𝒩(0, I) ; x' = x + σε.
+
+  - name: Sampling
+    color: "#F9E3C8"
+    category: Génératif
+    description: |
+      Échantillonnage dans une distribution latente ; l'astuce de reparamétrisation (VAE) rend le tirage dérivable par rapport à μ et σ.
+      Formule : z = μ + σ ⊙ ε, ε ~ 𝒩(0, I).
+      Réf. : Kingma & Welling, ICLR 2014 ; Rezende, Mohamed & Wierstra, « Stochastic Backpropagation… », ICML 2014.
+
+  - name: Generator
+    color: "#D5ECF3"
+    height: 44
+    category: Génératif
+    description: |
+      Générateur de GAN : transforme un bruit z en une donnée synthétique G(z) qui doit tromper le discriminateur.
+      Objectif : min_G max_D 𝔼ₓ[log D(x)] + 𝔼_z[log(1 − D(G(z)))].
+      Réf. : Goodfellow et al., « Generative Adversarial Nets », NeurIPS 2014 ; Radford, Metz & Chintala, « DCGAN », ICLR 2016.
+
+  - name: Discriminator
+    color: "#F6D3D3"
+    height: 44
+    category: Génératif
+    description: |
+      Discriminateur de GAN : classifieur qui estime la probabilité D(x) qu'une donnée soit réelle plutôt que générée.
+      Variantes : critique de WGAN (Arjovsky, Chintala & Bottou, ICML 2017), PatchGAN (Isola et al., « pix2pix », CVPR 2017).
+      Réf. : Goodfellow et al., « Generative Adversarial Nets », NeurIPS 2014.
+
+  # -------------------------------------------------- Transformer (papier)
+  - name: Input Embedding
+    color: "#F9D9DB"
+    height: 44
+    category: Transformer (papier)
+    description: |
+      Embedding des tokens d'entrée (côté encodeur), multiplié par √d_model avant l'ajout de l'encodage de position.
+      Formule : xᵢ = √d_model · E[tokenᵢ] + PE(i).
+      Réf. : Vaswani et al., « Attention Is All You Need », NeurIPS 2017 (§3.4).
+
+  - name: Output Embedding
+    color: "#F9D9DB"
+    height: 44
+    category: Transformer (papier)
+    description: |
+      Embedding des tokens déjà produits (décalés d'une position) en entrée du décodeur ; matrice partagée avec l'embedding d'entrée et la projection avant la softmax.
+      Réf. : Vaswani et al., NeurIPS 2017 (§3.4) ; Press & Wolf, « Using the Output Embedding to Improve Language Models », EACL 2017.
+
+  - name: Add & Norm
+    color: "#F2F5C4"
+    height: 22
+    category: Transformer (papier)
+    description: |
+      Connexion résiduelle suivie d'une Layer Norm (post-LN, version de l'article) ; les modèles récents utilisent plutôt pre-LN : x + Sublayer(LN(x)).
+      Formule : y = LayerNorm(x + Sublayer(x)).
+      Réf. : He et al., ResNet, CVPR 2016 ; Ba et al., 2016 ; Vaswani et al., 2017 ; Xiong et al., « On Layer Normalization in the Transformer Architecture », ICML 2020.
+
+  - name: MatMul
+    color: "#CBC1E6"
+    width: 80
+    height: 22
+    category: Transformer (papier)
+    description: |
+      Produit matriciel ; dans l'attention : scores QKᵀ (premier MatMul), puis somme pondérée des valeurs AV (second MatMul).
+      Formule : (AB)ᵢⱼ = Σₖ Aᵢₖ Bₖⱼ.
+
+  - name: Scale
+    color: "#FBF3BF"
+    width: 80
+    height: 22
+    category: Transformer (papier)
+    description: |
+      Mise à l'échelle des scores d'attention par 1/√d_k : pour d_k grand, les produits scalaires ont une variance ≈ d_k et saturent la softmax.
+      Formule : S = QKᵀ / √d_k.
+      Réf. : Vaswani et al., NeurIPS 2017 (§3.2.1).
+
+  - name: Mask (opt.)
+    color: "#F7CEDB"
+    width: 80
+    height: 22
+    category: Transformer (papier)
+    description: |
+      Masque optionnel ajouté aux scores avant la softmax : −∞ sur les positions interdites (futur pour le décodeur causal, padding).
+      Formule : S' = S + M, M_ij ∈ {0, −∞}.
+      Réf. : Vaswani et al., NeurIPS 2017.
+
+  - name: SoftMax
+    id: softmax_attention
+    color: "#CFEBD2"
+    width: 80
+    height: 22
+    category: Transformer (papier)
+    description: |
+      Softmax ligne par ligne sur les scores d'attention : chaque requête obtient une distribution de poids sur les clés.
+      Formule : A_ij = exp(S_ij) / Σₖ exp(S_ik).
+
+  - name: Concat
+    color: "#FCEFBF"
+    width: 80
+    height: 22
+    category: Transformer (papier)
+    description: |
+      Concaténation des sorties des h têtes d'attention le long des features, avant la projection W_O.
+      Formule : Concat(head₁, …, head_h) ∈ ℝ^(n × h·d_v).
+
+  - name: Linear (projection Q/K/V)
+    id: linear_proj
+    label: Linear
+    color: "#E4EDE9"
+    width: 60
+    height: 22
+    stack: 2
+    category: Transformer (papier)
+    description: |
+      Projections linéaires propres à chaque tête qui produisent requêtes, clés et valeurs (empilées ×h dans la figure de l'article).
+      Formule : Qᵢ = QW_Qⁱ, Kᵢ = KW_Kⁱ, Vᵢ = VW_Vⁱ, avec W_Qⁱ, W_Kⁱ ∈ ℝ^(d_model×d_k), W_Vⁱ ∈ ℝ^(d_model×d_v).
+
+  # ------------------------------------------------------------- Opérateurs
+  - name: Concaténation
+    id: op_concat
+    shape: circle
+    symbol: concat
+    color: "#FFFFFF"
+    category: Opérateurs
+    description: |
+      Concaténation de tenseurs le long des canaux / features (skip connections du U-Net, DenseNet). Symbole : croix qui touche le cercle.
+      Formule : [x ; y] ∈ ℝ^(C₁ + C₂).
+      Réf. : Ronneberger et al., « U-Net », MICCAI 2015 ; Huang et al., « Densely Connected Convolutional Networks », CVPR 2017.
+
+  - name: Addition
+    id: op_plus
+    shape: circle
+    symbol: plus
+    color: "#FFFFFF"
+    category: Opérateurs
+    description: |
+      Addition élément par élément (connexion résiduelle, ajout de l'encodage de position…) ; les tenseurs ont la même forme. Symbole : croix qui ne touche pas le cercle.
+      Formule : y = x + F(x).
+      Réf. : He et al., « Deep Residual Learning for Image Recognition », CVPR 2016.
+
+  - name: Différence
+    id: op_minus
+    shape: circle
+    symbol: minus
+    color: "#FFFFFF"
+    category: Opérateurs
+    description: |
+      Différence élément par élément (résidu, erreur de prédiction, comparaison de caractéristiques).
+      Formule : y = x₁ − x₂.
+
+  - name: Multiplication
+    id: op_times
+    shape: circle
+    symbol: times
+    color: "#FFFFFF"
+    category: Opérateurs
+    description: |
+      Multiplication (élément par élément, ou mise à l'échelle par un scalaire ou une porte).
+      Formule : y = x₁ × x₂.
+
+  - name: Produit terme à terme
+    id: op_dot
+    shape: circle
+    symbol: dot
+    color: "#FFFFFF"
+    category: Opérateurs
+    description: |
+      Produit terme à terme (Hadamard) : portes des LSTM / GLU, attention par canal (Squeeze-and-Excitation).
+      Formule : (x ⊙ y)ᵢ = xᵢ yᵢ.
+      Réf. : Hu, Shen & Sun, « Squeeze-and-Excitation Networks », CVPR 2018.

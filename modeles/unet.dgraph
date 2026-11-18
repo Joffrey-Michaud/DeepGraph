@@ -1,0 +1,819 @@
+{
+ "format": "deepgraph",
+ "version": 1,
+ "nodes": [
+  {
+   "type": "block",
+   "uid": 1,
+   "x": -405.0,
+   "y": -20.0,
+   "w": 150.0,
+   "h": 40.0,
+   "def_id": "Conv2D",
+   "text": "2× (Conv 3×3 + ReLU)\n64 canaux",
+   "color": "#CFE8CC",
+   "text_color": "#000000",
+   "font_size": 13,
+   "bold": false,
+   "italic": false,
+   "stack": 0,
+   "border_width": null,
+   "opacity_pct": 100,
+   "stack_dx": 4.0,
+   "stack_dy": -4.0,
+   "stack_fade": true,
+   "order": 0,
+   "parent": null,
+   "layer": 1
+  },
+  {
+   "type": "block",
+   "uid": 2,
+   "x": 255.0,
+   "y": -20.0,
+   "w": 150.0,
+   "h": 40.0,
+   "def_id": "Conv2D",
+   "text": "2× (Conv 3×3 + ReLU)\n64 canaux",
+   "color": "#CFE8CC",
+   "text_color": "#000000",
+   "font_size": 13,
+   "bold": false,
+   "italic": false,
+   "stack": 0,
+   "border_width": null,
+   "opacity_pct": 100,
+   "stack_dx": 4.0,
+   "stack_dy": -4.0,
+   "stack_fade": true,
+   "order": 1,
+   "parent": null,
+   "layer": 1
+  },
+  {
+   "type": "block",
+   "uid": 3,
+   "x": -330.0,
+   "y": 75.0,
+   "w": 150.0,
+   "h": 40.0,
+   "def_id": "Conv2D",
+   "text": "2× (Conv 3×3 + ReLU)\n128 canaux",
+   "color": "#CFE8CC",
+   "text_color": "#000000",
+   "font_size": 13,
+   "bold": false,
+   "italic": false,
+   "stack": 0,
+   "border_width": null,
+   "opacity_pct": 100,
+   "stack_dx": 4.0,
+   "stack_dy": -4.0,
+   "stack_fade": true,
+   "order": 2,
+   "parent": null,
+   "layer": 1
+  },
+  {
+   "type": "block",
+   "uid": 4,
+   "x": 180.0,
+   "y": 75.0,
+   "w": 150.0,
+   "h": 40.0,
+   "def_id": "Conv2D",
+   "text": "2× (Conv 3×3 + ReLU)\n128 canaux",
+   "color": "#CFE8CC",
+   "text_color": "#000000",
+   "font_size": 13,
+   "bold": false,
+   "italic": false,
+   "stack": 0,
+   "border_width": null,
+   "opacity_pct": 100,
+   "stack_dx": 4.0,
+   "stack_dy": -4.0,
+   "stack_fade": true,
+   "order": 3,
+   "parent": null,
+   "layer": 1
+  },
+  {
+   "type": "block",
+   "uid": 5,
+   "x": -255.0,
+   "y": 170.0,
+   "w": 150.0,
+   "h": 40.0,
+   "def_id": "Conv2D",
+   "text": "2× (Conv 3×3 + ReLU)\n256 canaux",
+   "color": "#CFE8CC",
+   "text_color": "#000000",
+   "font_size": 13,
+   "bold": false,
+   "italic": false,
+   "stack": 0,
+   "border_width": null,
+   "opacity_pct": 100,
+   "stack_dx": 4.0,
+   "stack_dy": -4.0,
+   "stack_fade": true,
+   "order": 4,
+   "parent": null,
+   "layer": 1
+  },
+  {
+   "type": "block",
+   "uid": 6,
+   "x": 105.0,
+   "y": 170.0,
+   "w": 150.0,
+   "h": 40.0,
+   "def_id": "Conv2D",
+   "text": "2× (Conv 3×3 + ReLU)\n256 canaux",
+   "color": "#CFE8CC",
+   "text_color": "#000000",
+   "font_size": 13,
+   "bold": false,
+   "italic": false,
+   "stack": 0,
+   "border_width": null,
+   "opacity_pct": 100,
+   "stack_dx": 4.0,
+   "stack_dy": -4.0,
+   "stack_fade": true,
+   "order": 5,
+   "parent": null,
+   "layer": 1
+  },
+  {
+   "type": "block",
+   "uid": 7,
+   "x": -180.0,
+   "y": 265.0,
+   "w": 150.0,
+   "h": 40.0,
+   "def_id": "Conv2D",
+   "text": "2× (Conv 3×3 + ReLU)\n512 canaux",
+   "color": "#CFE8CC",
+   "text_color": "#000000",
+   "font_size": 13,
+   "bold": false,
+   "italic": false,
+   "stack": 0,
+   "border_width": null,
+   "opacity_pct": 100,
+   "stack_dx": 4.0,
+   "stack_dy": -4.0,
+   "stack_fade": true,
+   "order": 6,
+   "parent": null,
+   "layer": 1
+  },
+  {
+   "type": "block",
+   "uid": 8,
+   "x": 30.0,
+   "y": 265.0,
+   "w": 150.0,
+   "h": 40.0,
+   "def_id": "Conv2D",
+   "text": "2× (Conv 3×3 + ReLU)\n512 canaux",
+   "color": "#CFE8CC",
+   "text_color": "#000000",
+   "font_size": 13,
+   "bold": false,
+   "italic": false,
+   "stack": 0,
+   "border_width": null,
+   "opacity_pct": 100,
+   "stack_dx": 4.0,
+   "stack_dy": -4.0,
+   "stack_fade": true,
+   "order": 7,
+   "parent": null,
+   "layer": 1
+  },
+  {
+   "type": "block",
+   "uid": 9,
+   "x": -75.0,
+   "y": 360.0,
+   "w": 150.0,
+   "h": 40.0,
+   "def_id": "Conv2D",
+   "text": "2× (Conv 3×3 + ReLU)\n1024 canaux",
+   "color": "#CFE8CC",
+   "text_color": "#000000",
+   "font_size": 13,
+   "bold": false,
+   "italic": false,
+   "stack": 0,
+   "border_width": null,
+   "opacity_pct": 100,
+   "stack_dx": 4.0,
+   "stack_dy": -4.0,
+   "stack_fade": true,
+   "order": 8,
+   "parent": null,
+   "layer": 1
+  },
+  {
+   "type": "block",
+   "uid": 10,
+   "x": -405.0,
+   "y": -94.0,
+   "w": 150.0,
+   "h": 28.0,
+   "text": "Image d'entrée",
+   "color": "#F0F0F0",
+   "text_color": "#000000",
+   "font_size": 13,
+   "bold": false,
+   "italic": false,
+   "stack": 0,
+   "border_width": null,
+   "opacity_pct": 100,
+   "stack_dx": 4.0,
+   "stack_dy": -4.0,
+   "stack_fade": true,
+   "order": 9,
+   "parent": null,
+   "layer": 1
+  },
+  {
+   "type": "block",
+   "uid": 24,
+   "x": 255.0,
+   "y": -84.0,
+   "w": 150.0,
+   "h": 28.0,
+   "def_id": "Conv 1×1",
+   "text": "Conv 1×1",
+   "color": "#CFE8CC",
+   "text_color": "#000000",
+   "font_size": 13,
+   "bold": false,
+   "italic": false,
+   "stack": 0,
+   "border_width": null,
+   "opacity_pct": 100,
+   "stack_dx": 4.0,
+   "stack_dy": -4.0,
+   "stack_fade": true,
+   "order": 10,
+   "parent": null,
+   "layer": 1
+  },
+  {
+   "type": "block",
+   "uid": 25,
+   "x": 255.0,
+   "y": -154.0,
+   "w": 150.0,
+   "h": 28.0,
+   "text": "Carte de segmentation",
+   "color": "#F0F0F0",
+   "text_color": "#000000",
+   "font_size": 13,
+   "bold": false,
+   "italic": false,
+   "stack": 0,
+   "border_width": null,
+   "opacity_pct": 100,
+   "stack_dx": 4.0,
+   "stack_dy": -4.0,
+   "stack_fade": true,
+   "order": 11,
+   "parent": null,
+   "layer": 1
+  },
+  {
+   "type": "text",
+   "uid": 29,
+   "x": -286.0,
+   "y": 449.0,
+   "w": 187.61,
+   "h": 22.0,
+   "text": "Max Pool 2×2 (sous-échantillonnage)",
+   "font_size": 11,
+   "bold": false,
+   "italic": false,
+   "color": "#000000",
+   "align": "left",
+   "order": 12,
+   "parent": null,
+   "layer": 1
+  },
+  {
+   "type": "text",
+   "uid": 31,
+   "x": -286.0,
+   "y": 471.0,
+   "w": 174.78,
+   "h": 22.0,
+   "text": "Up-conv 2×2 (sur-échantillonnage)",
+   "font_size": 11,
+   "bold": false,
+   "italic": false,
+   "color": "#000000",
+   "align": "left",
+   "order": 13,
+   "parent": null,
+   "layer": 1
+  },
+  {
+   "type": "text",
+   "uid": 33,
+   "x": -286.0,
+   "y": 493.0,
+   "w": 143.02,
+   "h": 22.0,
+   "text": "copie + concaténation (skip)",
+   "font_size": 11,
+   "bold": false,
+   "italic": false,
+   "color": "#000000",
+   "align": "left",
+   "order": 14,
+   "parent": null,
+   "layer": 1
+  },
+  {
+   "type": "text",
+   "uid": 35,
+   "x": -286.0,
+   "y": 515.0,
+   "w": 133.83,
+   "h": 22.0,
+   "text": "Conv 1×1 vers les classes",
+   "font_size": 11,
+   "bold": false,
+   "italic": false,
+   "color": "#000000",
+   "align": "left",
+   "order": 15,
+   "parent": null,
+   "layer": 1
+  },
+  {
+   "type": "text",
+   "uid": 36,
+   "x": -24.3,
+   "y": 560.5,
+   "w": 48.61,
+   "h": 29.0,
+   "text": "U-Net",
+   "font_size": 16,
+   "bold": true,
+   "italic": false,
+   "color": "#000000",
+   "align": "center",
+   "order": 16,
+   "parent": null,
+   "layer": 1
+  },
+  {
+   "type": "text",
+   "uid": 37,
+   "x": -248.66,
+   "y": 587.0,
+   "w": 497.31,
+   "h": 20.0,
+   "text": "Ronneberger, Fischer & Brox, U-Net: convolutional networks for biomedical image segmentation, MICCAI 2015",
+   "font_size": 10,
+   "bold": false,
+   "italic": true,
+   "color": "#555555",
+   "align": "center",
+   "order": 17,
+   "parent": null,
+   "layer": 1
+  }
+ ],
+ "arrows": [
+  {
+   "type": "arrow",
+   "uid": 11,
+   "src": {
+    "node": 10,
+    "fx": 0.5,
+    "fy": 1.0
+   },
+   "dst": {
+    "node": 1,
+    "fx": 0.5,
+    "fy": 0.0
+   },
+   "style": "straight",
+   "first": "auto",
+   "mid": null,
+   "head": "end",
+   "width": null,
+   "color": "#000000",
+   "dashed": false,
+   "layer": 1
+  },
+  {
+   "type": "arrow",
+   "uid": 12,
+   "src": {
+    "node": 1,
+    "fx": 0.5,
+    "fy": 1.0
+   },
+   "dst": {
+    "node": 3,
+    "fx": 0.5,
+    "fy": 0.0
+   },
+   "style": "ortho2",
+   "first": "v",
+   "mid": null,
+   "head": "end",
+   "width": null,
+   "color": "#C0392B",
+   "dashed": false,
+   "layer": 1
+  },
+  {
+   "type": "arrow",
+   "uid": 13,
+   "src": {
+    "node": 4,
+    "fx": 0.5,
+    "fy": 0.0
+   },
+   "dst": {
+    "node": 2,
+    "fx": 0.5,
+    "fy": 1.0
+   },
+   "style": "ortho2",
+   "first": "v",
+   "mid": null,
+   "head": "end",
+   "width": null,
+   "color": "#2E8B57",
+   "dashed": false,
+   "layer": 1
+  },
+  {
+   "type": "arrow",
+   "uid": 14,
+   "src": {
+    "node": 1,
+    "fx": 1.0,
+    "fy": 0.5
+   },
+   "dst": {
+    "node": 2,
+    "fx": 0.0,
+    "fy": 0.5
+   },
+   "style": "straight",
+   "first": "auto",
+   "mid": null,
+   "head": "end",
+   "width": null,
+   "color": "#8A8A8A",
+   "dashed": true,
+   "layer": 1
+  },
+  {
+   "type": "arrow",
+   "uid": 15,
+   "src": {
+    "node": 3,
+    "fx": 0.5,
+    "fy": 1.0
+   },
+   "dst": {
+    "node": 5,
+    "fx": 0.5,
+    "fy": 0.0
+   },
+   "style": "ortho2",
+   "first": "v",
+   "mid": null,
+   "head": "end",
+   "width": null,
+   "color": "#C0392B",
+   "dashed": false,
+   "layer": 1
+  },
+  {
+   "type": "arrow",
+   "uid": 16,
+   "src": {
+    "node": 6,
+    "fx": 0.5,
+    "fy": 0.0
+   },
+   "dst": {
+    "node": 4,
+    "fx": 0.5,
+    "fy": 1.0
+   },
+   "style": "ortho2",
+   "first": "v",
+   "mid": null,
+   "head": "end",
+   "width": null,
+   "color": "#2E8B57",
+   "dashed": false,
+   "layer": 1
+  },
+  {
+   "type": "arrow",
+   "uid": 17,
+   "src": {
+    "node": 3,
+    "fx": 1.0,
+    "fy": 0.5
+   },
+   "dst": {
+    "node": 4,
+    "fx": 0.0,
+    "fy": 0.5
+   },
+   "style": "straight",
+   "first": "auto",
+   "mid": null,
+   "head": "end",
+   "width": null,
+   "color": "#8A8A8A",
+   "dashed": true,
+   "layer": 1
+  },
+  {
+   "type": "arrow",
+   "uid": 18,
+   "src": {
+    "node": 5,
+    "fx": 0.5,
+    "fy": 1.0
+   },
+   "dst": {
+    "node": 7,
+    "fx": 0.5,
+    "fy": 0.0
+   },
+   "style": "ortho2",
+   "first": "v",
+   "mid": null,
+   "head": "end",
+   "width": null,
+   "color": "#C0392B",
+   "dashed": false,
+   "layer": 1
+  },
+  {
+   "type": "arrow",
+   "uid": 19,
+   "src": {
+    "node": 8,
+    "fx": 0.5,
+    "fy": 0.0
+   },
+   "dst": {
+    "node": 6,
+    "fx": 0.5,
+    "fy": 1.0
+   },
+   "style": "ortho2",
+   "first": "v",
+   "mid": null,
+   "head": "end",
+   "width": null,
+   "color": "#2E8B57",
+   "dashed": false,
+   "layer": 1
+  },
+  {
+   "type": "arrow",
+   "uid": 20,
+   "src": {
+    "node": 5,
+    "fx": 1.0,
+    "fy": 0.5
+   },
+   "dst": {
+    "node": 6,
+    "fx": 0.0,
+    "fy": 0.5
+   },
+   "style": "straight",
+   "first": "auto",
+   "mid": null,
+   "head": "end",
+   "width": null,
+   "color": "#8A8A8A",
+   "dashed": true,
+   "layer": 1
+  },
+  {
+   "type": "arrow",
+   "uid": 21,
+   "src": {
+    "node": 7,
+    "fx": 0.5,
+    "fy": 1.0
+   },
+   "dst": {
+    "node": 9,
+    "fx": 0.0,
+    "fy": 0.5
+   },
+   "style": "ortho1",
+   "first": "v",
+   "mid": null,
+   "head": "end",
+   "width": null,
+   "color": "#C0392B",
+   "dashed": false,
+   "layer": 1
+  },
+  {
+   "type": "arrow",
+   "uid": 22,
+   "src": {
+    "node": 9,
+    "fx": 1.0,
+    "fy": 0.5
+   },
+   "dst": {
+    "node": 8,
+    "fx": 0.5,
+    "fy": 1.0
+   },
+   "style": "ortho1",
+   "first": "h",
+   "mid": null,
+   "head": "end",
+   "width": null,
+   "color": "#2E8B57",
+   "dashed": false,
+   "layer": 1
+  },
+  {
+   "type": "arrow",
+   "uid": 23,
+   "src": {
+    "node": 7,
+    "fx": 1.0,
+    "fy": 0.5
+   },
+   "dst": {
+    "node": 8,
+    "fx": 0.0,
+    "fy": 0.5
+   },
+   "style": "straight",
+   "first": "auto",
+   "mid": null,
+   "head": "end",
+   "width": null,
+   "color": "#8A8A8A",
+   "dashed": true,
+   "layer": 1
+  },
+  {
+   "type": "arrow",
+   "uid": 26,
+   "src": {
+    "node": 2,
+    "fx": 0.5,
+    "fy": 0.0
+   },
+   "dst": {
+    "node": 24,
+    "fx": 0.5,
+    "fy": 1.0
+   },
+   "style": "straight",
+   "first": "auto",
+   "mid": null,
+   "head": "end",
+   "width": null,
+   "color": "#2A7F9E",
+   "dashed": false,
+   "layer": 1
+  },
+  {
+   "type": "arrow",
+   "uid": 27,
+   "src": {
+    "node": 24,
+    "fx": 0.5,
+    "fy": 0.0
+   },
+   "dst": {
+    "node": 25,
+    "fx": 0.5,
+    "fy": 1.0
+   },
+   "style": "straight",
+   "first": "auto",
+   "mid": null,
+   "head": "end",
+   "width": null,
+   "color": "#000000",
+   "dashed": false,
+   "layer": 1
+  },
+  {
+   "type": "arrow",
+   "uid": 28,
+   "src": {
+    "x": -330.0,
+    "y": 460.0
+   },
+   "dst": {
+    "x": -296.0,
+    "y": 460.0
+   },
+   "style": "straight",
+   "first": "auto",
+   "mid": null,
+   "head": "end",
+   "width": null,
+   "color": "#C0392B",
+   "dashed": false,
+   "layer": 1
+  },
+  {
+   "type": "arrow",
+   "uid": 30,
+   "src": {
+    "x": -330.0,
+    "y": 482.0
+   },
+   "dst": {
+    "x": -296.0,
+    "y": 482.0
+   },
+   "style": "straight",
+   "first": "auto",
+   "mid": null,
+   "head": "end",
+   "width": null,
+   "color": "#2E8B57",
+   "dashed": false,
+   "layer": 1
+  },
+  {
+   "type": "arrow",
+   "uid": 32,
+   "src": {
+    "x": -330.0,
+    "y": 504.0
+   },
+   "dst": {
+    "x": -296.0,
+    "y": 504.0
+   },
+   "style": "straight",
+   "first": "auto",
+   "mid": null,
+   "head": "end",
+   "width": null,
+   "color": "#8A8A8A",
+   "dashed": true,
+   "layer": 1
+  },
+  {
+   "type": "arrow",
+   "uid": 34,
+   "src": {
+    "x": -330.0,
+    "y": 526.0
+   },
+   "dst": {
+    "x": -296.0,
+    "y": 526.0
+   },
+   "style": "straight",
+   "first": "auto",
+   "mid": null,
+   "head": "end",
+   "width": null,
+   "color": "#2A7F9E",
+   "dashed": false,
+   "layer": 1
+  }
+ ],
+ "settings": {
+  "border_width": 1.6,
+  "arrow_width": 1.6
+ },
+ "layers": [
+  {
+   "id": 1,
+   "name": "Calque 1",
+   "visible": true,
+   "locked": false,
+   "opacity": 1.0
+  }
+ ]
+}

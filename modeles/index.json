@@ -1,0 +1,80 @@
+[
+ {
+  "file": "lenet5.dgraph",
+  "title": "LeNet-5",
+  "category": "Réseaux convolutifs",
+  "ref": "LeCun et al., 1998"
+ },
+ {
+  "file": "alexnet.dgraph",
+  "title": "AlexNet",
+  "category": "Réseaux convolutifs",
+  "ref": "Krizhevsky et al., 2012"
+ },
+ {
+  "file": "vgg16.dgraph",
+  "title": "VGG-16",
+  "category": "Réseaux convolutifs",
+  "ref": "Simonyan & Zisserman, 2015"
+ },
+ {
+  "file": "inception.dgraph",
+  "title": "Module Inception (GoogLeNet)",
+  "category": "Réseaux convolutifs",
+  "ref": "Szegedy et al., 2015"
+ },
+ {
+  "file": "resnet18.dgraph",
+  "title": "ResNet-18",
+  "category": "Réseaux convolutifs",
+  "ref": "He et al., 2016"
+ },
+ {
+  "file": "unet.dgraph",
+  "title": "U-Net",
+  "category": "Réseaux convolutifs",
+  "ref": "Ronneberger et al., 2015"
+ },
+ {
+  "file": "transformer.dgraph",
+  "title": "Transformer (encodeur–décodeur)",
+  "category": "Attention / Transformers",
+  "ref": "Vaswani et al., 2017"
+ },
+ {
+  "file": "attention.dgraph",
+  "title": "Scaled Dot-Product & Multi-Head Attention",
+  "category": "Attention / Transformers",
+  "ref": "Vaswani et al., 2017"
+ },
+ {
+  "file": "vit.dgraph",
+  "title": "Vision Transformer (ViT)",
+  "category": "Attention / Transformers",
+  "ref": "Dosovitskiy et al., 2021"
+ },
+ {
+  "file": "vae.dgraph",
+  "title": "Autoencodeur variationnel (VAE)",
+  "category": "Génératifs",
+  "ref": "Kingma & Welling, 2014"
+ },
+ {
+  "file": "gan.dgraph",
+  "title": "GAN",
+  "category": "Génératifs",
+  "ref": "Goodfellow et al., 2014"
+ },
+ {
+  "file": "mlp.dgraph",
+  "title": "Perceptron multicouche (MLP)",
+  "category": "Autres",
+  "ref": "Rumelhart et al., 1986"
+ },
+ {
+  "file": "seq2seq.dgraph",
+  "title": "Seq2seq LSTM",
+  "category": "Autres",
+  "ref": "Sutskever et al., 2014"
+ }
+]
