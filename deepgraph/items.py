@@ -159,6 +159,7 @@ class NodeItem(QGraphicsItem):
         super().__init__()
         self.uid = None
         self.def_id = None
+        self.ref = None            # référence stable (ex. nom du module PyTorch d'origine)
         self.w, self.h = float(w), float(h)
         self.arrows = []
         self.border_width = None   # None = épaisseur globale du diagramme
@@ -274,6 +275,8 @@ class NodeItem(QGraphicsItem):
              "y": round(self.pos().y(), 2), "w": round(self.w, 2), "h": round(self.h, 2)}
         if self.def_id:
             d["def_id"] = self.def_id
+        if self.ref:
+            d["ref"] = self.ref
         for k in self.SAVE:
             d[k] = getattr(self, k)
         return d
@@ -284,6 +287,7 @@ class NodeItem(QGraphicsItem):
         it.w = float(d.get("w", it.w))
         it.h = float(d.get("h", it.h))
         it.def_id = d.get("def_id")
+        it.ref = d.get("ref")
         for k in cls.SAVE:
             if k in d:
                 setattr(it, k, d[k])
