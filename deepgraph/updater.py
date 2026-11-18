@@ -13,7 +13,12 @@ Installation :
     fichiers ; un fichier modifié localement (blocks.yaml…) est gardé, la nouvelle version est posée
     à côté (`.nouveau`) ; sauvegarde des fichiers remplacés dans un dossier temporaire.
 
-DEEPGRAPH_NO_UPDATE=1 désactive la vérification au démarrage.
+Sans terminal interactif (export par script, éditeur en QT_QPA_PLATFORM=offscreen, tâche planifiée…),
+la mise à jour trouvée est installée automatiquement, avec les mêmes garde-fous ; elle sert au lancement
+suivant. Un verrou empêche deux processus lancés en même temps d'installer ensemble.
+
+DEEPGRAPH_NO_UPDATE=1 désactive la vérification au démarrage ; DEEPGRAPH_NO_AUTO_UPDATE=1 garde la
+vérification sans terminal interactif mais n'installe plus rien automatiquement (simple message).
 """
 import hashlib
 import io
@@ -91,8 +96,17 @@ def current_version():
     return parse_version(__version__)
 
 
+def _env_true(name):
+    return os.environ.get(name, "").strip().lower() not in ("", "0", "false", "non", "no")
+
+
 def disabled():
-    return os.environ.get("DEEPGRAPH_NO_UPDATE", "").strip() not in ("", "0", "false", "non", "no")
+    return _env_true("DEEPGRAPH_NO_UPDATE")
+
+
+def auto_install_disabled():
+    """sans terminal interactif : DEEPGRAPH_NO_AUTO_UPDATE=1 -> message seulement, pas d'installation"""
+    return _env_true("DEEPGRAPH_NO_AUTO_UPDATE")
 
 
 # ------------------------------------------------------------------ transports
@@ -215,14 +229,48 @@ def install_mode():
     return "git" if git_state() is not None else "archive"
 
 
+LOCK = os.path.join(tempfile.gettempdir(),
+                    "deepgraph_update_" + hashlib.sha1(os.path.realpath(ROOT).encode()).hexdigest()[:12] + ".lock")
+LOCK_STALE = 15 * 60                   # secondes : un verrou plus vieux vient d'un processus interrompu
+
+
+def _acquire_lock():
+    """Verrou d'installation (hors du dossier DeepGraph, pour ne pas salir le clone). False si pris."""
+    import time
+    try:
+        if time.time() - os.path.getmtime(LOCK) > LOCK_STALE:
+            os.remove(LOCK)
+    except OSError:
+        pass
+    try:
+        fd = os.open(LOCK, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        return False
+    with os.fdopen(fd, "w") as f:
+        f.write(str(os.getpid()))
+    return True
+
+
+def _release_lock():
+    try:
+        os.remove(LOCK)
+    except OSError:
+        pass
+
+
 def install(release, log=print):
     """Installe la release. Renvoie (succès, message). Ne lève pas d'exception."""
+    if not _acquire_lock():
+        return False, ("Une autre installation de DeepGraph est en cours (verrou " + LOCK + ") : rien n'a été "
+                       "fait ici.")
     try:
         if install_mode() == "git":
             return _install_git(release, log)
         return _install_archive(release, log)
     except Exception as e:  # noqa: BLE001
         return False, f"Mise à jour interrompue : {type(e).__name__} : {e}"
+    finally:
+        _release_lock()
 
 
 def _install_git(release, log):
@@ -319,8 +367,9 @@ def _install_archive(release, log):
 
 # --------------------------------------------------------------------- headless
 def run_terminal(ask=True, apply=False, out=None):
-    """Vérification en mode texte. ask : demander (si terminal interactif) ; apply : installer sans demander.
-    Renvoie 'installed', 'uptodate', 'declined', 'failed' ou 'unchecked'."""
+    """Vérification en mode texte. apply : installer sans demander. ask : dans un terminal interactif, demander ;
+    sans terminal interactif (script, offscreen, tâche planifiée), installer automatiquement, sauf si
+    DEEPGRAPH_NO_AUTO_UPDATE=1. Renvoie 'installed', 'uptodate', 'declined', 'failed' ou 'unchecked'."""
     import sys
     out = out or sys.stderr
     res = check()
@@ -328,11 +377,17 @@ def run_terminal(ask=True, apply=False, out=None):
         r = res.release
         print(f"[mise à jour] DeepGraph {r.label} est disponible (version actuelle : {__version__}).", file=out)
         go = apply
-        if not go and ask and sys.stdin is not None and sys.stdin.isatty():
-            try:
-                go = input("Installer maintenant ? [o/N] ").strip().lower() in ("o", "oui", "y", "yes")
-            except EOFError:
-                go = False
+        if not go and ask:
+            interactive = sys.stdin is not None and sys.stdin.isatty()
+            if interactive:
+                try:
+                    go = input("Installer maintenant ? [o/N] ").strip().lower() in ("o", "oui", "y", "yes")
+                except EOFError:
+                    go = False
+            elif not auto_install_disabled():
+                print("[mise à jour] pas de terminal interactif : installation automatique "
+                      "(DEEPGRAPH_NO_AUTO_UPDATE=1 pour l'éviter).", file=out)
+                go = True
         if not go:
             print("[mise à jour] Pour installer : python main.py --update", file=out)
             return "declined"

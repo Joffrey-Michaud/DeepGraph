@@ -32,7 +32,7 @@ def main():
         sys.exit(0 if updater.run_terminal(apply=True, out=sys.stdout) in ("installed", "uptodate") else 1)
     headless = os.environ.get("QT_QPA_PLATFORM", "") in ("offscreen", "minimal")
     if headless and not args.no_update_check and not updater.disabled():
-        updater.run_terminal(ask=True)
+        updater.run_terminal(ask=True)   # terminal interactif : demande ; sinon installe tout seul
 
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)

@@ -77,7 +77,7 @@ def main():
         ap.error("-o / --out et -d / --dir s'excluent")
 
     if not args.no_update_check and not updater.disabled():
-        updater.run_terminal(ask=True)          # demande seulement dans un terminal interactif
+        updater.run_terminal(ask=True)          # terminal interactif : demande ; sinon installe tout seul
     CFG.load(args.config)
     for err in CFG.errors:
         print("[config]", err, file=sys.stderr)

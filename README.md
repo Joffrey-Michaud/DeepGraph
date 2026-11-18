@@ -70,14 +70,18 @@ démarrage tant qu'elle n'est pas installée) ; **Aide > Rechercher des mises à
 - **En fenêtre** : vérification en tâche de fond, boîte « Mise à jour disponible » avec les notes de version,
   puis proposition de redémarrer.
 - **Sans fenêtre** (`outils/exporter.py`, éditeur lancé avec `QT_QPA_PLATFORM=offscreen`) : question dans le
-  terminal s'il est interactif, sinon simple message. `python main.py --update` installe directement.
+  terminal s'il est interactif ; sinon (script, tâche planifiée, agent) **installation automatique**, avec les
+  mêmes garde-fous, utilisée au lancement suivant. Un verrou empêche deux processus d'installer en même
+  temps. `python main.py --update` installe directement.
 - **Installation** : dans un clone git, `main` avance jusqu'au tag de la release (seulement sur `main` sans
   modification locale, sinon rien n'est touché) ; dans une copie (.zip), l'archive de la release remplace les
   fichiers, un `blocks.yaml` modifié est conservé (la nouvelle version est posée à côté, `blocks.yaml.nouveau`).
 - **Accès** : le dépôt est privé. La vérification utilise un jeton (`DEEPGRAPH_TOKEN`, `GITHUB_TOKEN` ou
   `GH_TOKEN`), sinon GitHub CLI connecté (`gh auth login`), sinon `git` pour un clone. Sans aucun de ces moyens,
   un avertissement explique quoi installer.
-- **Désactiver** : `--no-update-check` ou `DEEPGRAPH_NO_UPDATE=1`.
+- **Désactiver** : `--no-update-check` ou `DEEPGRAPH_NO_UPDATE=1` (plus aucune vérification) ;
+  `DEEPGRAPH_NO_AUTO_UPDATE=1` garde la vérification sans terminal interactif mais n'installe plus rien
+  tout seul (simple message).
 
 ## Générer un schéma avec un LLM
 
