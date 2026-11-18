@@ -7,12 +7,12 @@ from PyQt5.QtGui import QColor, QDesktopServices, QFont, QFontDatabase, QKeySequ
 from PyQt5.QtWidgets import (QAction, QActionGroup, QApplication, QColorDialog, QComboBox, QDockWidget,
                              QStackedWidget,
                              QDoubleSpinBox, QFileDialog, QInputDialog, QLabel, QMainWindow,
-                             QMenu, QMessageBox, QSpinBox, QStyle)
+                             QMenu, QMessageBox, QSpinBox, QStyle, QCheckBox)
 
-from .arrow import STYLES
+from .arrow import STYLES, ArrowItem
 from .items import BlockItem, NodeItem
 from .config import CFG
-from .export import export_scene
+from .export import copy_scene_image, export_scene
 from .layers import LayersPanel
 from .library import LibraryPanel
 from .properties import PropertiesPanel
@@ -91,7 +91,7 @@ class MainWindow(QMainWindow):
         self._make_actions()
         self._make_menus()
         self._make_toolbar()
-        self.view.context_actions = [self.a_edit, self._stack_entry, None, self.a_copy, self.a_dup, self.a_delete, None,
+        self.view.context_actions = [self.a_edit, self._stack_entry, self.a_fit_text, self._bend_menu, None, self.a_copy, self.a_copy_img, self.a_dup, self.a_delete, None,
                                      self.a_group, self.a_ungroup, self._order_menu, self._layer_menu, None, self.a_export_sel]
 
         self.zoom_label = QLabel("100 %")
@@ -156,6 +156,11 @@ class MainWindow(QMainWindow):
         self.a_undo = self._act("Annuler", sc.undo, QKeySequence.Undo, icon=QStyle.SP_ArrowBack)
         self.a_redo = self._act("Rétablir", sc.redo, ["Ctrl+Y", "Ctrl+Shift+Z"], icon=QStyle.SP_ArrowForward)
         self.a_copy = self._act("Copier", sc.copy_selection, QKeySequence.Copy)
+        self.a_copy_img = self._act("Copier comme image", self.copy_image, "Ctrl+Shift+C",
+                                    "Copier la sélection (ou tout le diagramme) comme image, "
+                                    "à coller dans un document, une présentation, Inkscape…")
+        self.a_fit_text = self._act("Ajuster la taille au texte", self.fit_selected_to_text, "Ctrl+Shift+T",
+                                    "Met les blocs sélectionnés juste à la taille de leur texte")
         self.a_cut = self._act("Couper", sc.cut_selection, QKeySequence.Cut)
         self.a_paste = self._act("Coller", sc.paste, QKeySequence.Paste)
         self.a_dup = self._act("Dupliquer", sc.duplicate, "Ctrl+D")
@@ -247,7 +252,7 @@ class MainWindow(QMainWindow):
                   self.a_export_sel, self.a_png_transp, None, self.a_quit):
             m.addSeparator() if a is None else m.addAction(a)
         m = mb.addMenu("&Édition")
-        for a in (self.a_undo, self.a_redo, None, self.a_cut, self.a_copy, self.a_paste, self.a_dup,
+        for a in (self.a_undo, self.a_redo, None, self.a_cut, self.a_copy, self.a_copy_img, self.a_paste, self.a_dup,
                   self.a_delete, None, self.a_edit, self.a_stack, self.a_all):
             m.addSeparator() if a is None else m.addAction(a)
         m = mb.addMenu("&Outils")
@@ -307,7 +312,7 @@ class MainWindow(QMainWindow):
         self.style_combo = QComboBox()
         for key, lab in STYLES:
             self.style_combo.addItem(lab, key)
-        self.style_combo.setToolTip("Tracé des nouvelles flèches (1 / 2 / 3)")
+        self.style_combo.setToolTip("Tracé des nouvelles flèches (touches 1 à 5)")
         self.style_combo.currentIndexChanged.connect(
             lambda i: setattr(self.scene, "arrow_style", self.style_combo.itemData(i)))
         tb.addWidget(self.style_combo)
@@ -354,6 +359,14 @@ class MainWindow(QMainWindow):
         tb2.addWidget(l)
         tb2.addWidget(sb)
         self.width_boxes["font_size"] = sb
+        self.fit_box = QCheckBox("Blocs ajustés au texte")
+        self.fit_box.setToolTip("Les blocs s'agrandissent pour que leur texte ne déborde jamais "
+                                "(ils ne rétrécissent pas tout seuls :\nclic droit > « Ajuster la taille au texte » "
+                                "pour les mettre juste à la taille du texte).")
+        self.fit_box.setChecked(self.scene.fit_text)
+        self.fit_box.toggled.connect(lambda v: self.scene.set_global("fit_text", v))
+        tb2.addWidget(QLabel("  "))
+        tb2.addWidget(self.fit_box)
         self.scene.settingsChanged.connect(self._sync_widths)
 
         tb2.addSeparator()
@@ -379,6 +392,10 @@ class MainWindow(QMainWindow):
 
     # ----------------------------------------------------------------- état
     def _sync_widths(self):
+        if self.fit_box.isChecked() != self.scene.fit_text:
+            self.fit_box.blockSignals(True)
+            self.fit_box.setChecked(self.scene.fit_text)
+            self.fit_box.blockSignals(False)
         for key, sb in self.width_boxes.items():
             v = getattr(self.scene, key)
             if abs(sb.value() - v) > 1e-9:
@@ -497,6 +514,32 @@ class MainWindow(QMainWindow):
     def _selected_blocks(self):
         return [i for i in self.scene.selectedItems() if isinstance(i, BlockItem)]
 
+    def _bend_menu(self, parent):
+        """Clic droit sur une flèche : coudes."""
+        arrows = [i for i in self.scene.selectedItems() if isinstance(i, ArrowItem)]
+        if len(arrows) != 1:
+            return None
+        a = arrows[0]
+        q = getattr(self.scene, "context_pos", None) or a.handle_points().get("src")
+        m = QMenu("Coudes", parent)
+
+        def do(fn, *args):
+            if fn(*args):
+                self.scene.checkpoint()
+                self.scene.itemsEdited.emit()
+
+        m.addAction("Ajouter un coude ici", lambda: do(a.add_bend, q))
+        rm = m.addAction("Supprimer ce segment", lambda: do(a.remove_bend, q))
+        rm.setEnabled(a.style == "free" and bool(a.bends))
+        m.addSeparator()
+        auto = m.addAction("Tracé automatique (contourne les blocs)",
+                           lambda: (a.set_prop("style", "auto"), self.scene.checkpoint(), self.scene.itemsEdited.emit()))
+        auto.setEnabled(a.style != "auto")
+        fr = m.addAction("Figer le tracé (coudes déplaçables)",
+                         lambda: (a.to_free(), self.scene.checkpoint(), self.scene.itemsEdited.emit()))
+        fr.setEnabled(a.style != "free")
+        return m
+
     def _stack_entry(self, parent):
         return self.a_stack if self._selected_blocks() else None
 
@@ -613,7 +656,7 @@ class MainWindow(QMainWindow):
     def new_file(self):
         if not self.maybe_save():
             return
-        self.scene.load({"nodes": [], "arrows": []})
+        self.scene.load({"nodes": [], "arrows": [], "settings": {"fit_text": True}})
         self.current_file = None
         self.saved_state = self.scene.current_state()
         self.view.zoom_reset()
@@ -724,6 +767,22 @@ class MainWindow(QMainWindow):
         self._on_modified()
         self.statusBar().showMessage(f"Enregistré : {path}", 4000)
         return True
+
+    def fit_selected_to_text(self):
+        if not self.scene.fit_selected_to_text():
+            self.statusBar().showMessage("Sélectionnez un ou plusieurs blocs", 4000)
+
+    def copy_image(self):
+        sel = self.scene.selectedItems() or None
+        try:
+            copy_scene_image(self.scene, only=sel, scale=self.png_scale,
+                             transparent=self.a_png_transp.isChecked())
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.critical(self, "Copie impossible", str(e))
+            return
+        what = "La sélection" if sel else "Le diagramme"
+        self.statusBar().showMessage(f"{what} est copié comme image (PNG + SVG + PDF) : "
+                                     "collez-le dans votre document", 5000)
 
     def export(self, selection=False):
         only = None

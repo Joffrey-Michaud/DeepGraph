@@ -5,6 +5,7 @@ from PyQt5.QtCore import Qt, QRectF, QPointF
 from PyQt5.QtGui import QPen, QColor, QPainter, QPainterPath, QFontMetricsF
 from PyQt5.QtWidgets import QApplication, QGraphicsItem
 
+from . import richtext
 from .config import CFG
 
 SEL_COLOR = QColor(30, 120, 230)
@@ -445,6 +446,69 @@ class BlockItem(NodeItem):
         """Taille effective du texte (px) : la sienne, ou la taille globale du diagramme."""
         return int(self.font_size) if self.font_size is not None else global_font_size(self)
 
+    # taille ajustée au texte ------------------------------------------------
+    TEXT_PAD_X, TEXT_PAD_Y = 6.0, 1.5
+
+    def fit_active(self):
+        sc = self.scene()
+        return bool(sc is not None and getattr(sc, "fit_text", False))
+
+    def text_need(self):
+        """Taille minimale pour que le texte ne déborde pas. Comme à l'affichage, un texte sans
+        formule revient à la ligne : la largeur doit contenir le mot le plus long, la hauteur
+        les lignes obtenues à cette largeur."""
+        size = self.text_size()
+        text = self.text or " "
+        fm = QFontMetricsF(CFG.font(size, self.bold, self.italic))
+        slack = max(0.0, fm.ascent() - 0.8 * size)   # vide au-dessus des lettres les plus hautes
+        if richtext.has_markup(text):
+            tw, th = richtext.measure(text, size, self.bold, self.italic)
+            nw = tw + 2 * self.TEXT_PAD_X
+            nh = th - slack + 2 * self.TEXT_PAD_Y
+        else:
+            words = text.split() or [" "]
+            nw = max(fm.horizontalAdvance(wd) for wd in words) + 2 * self.TEXT_PAD_X
+            wrap_w = max(self.w, nw) - 8                  # même rectangle que paint()
+            r = fm.boundingRect(QRectF(0, 0, wrap_w, 1e5), int(Qt.AlignHCenter | Qt.TextWordWrap), text)
+            nh = r.height() - slack + 2 * self.TEXT_PAD_Y
+        return max(self.MIN, nw), max(self.MIN, nh)
+
+    def set_size(self, w, h):
+        if self.fit_active():
+            nw, nh = self.text_need()
+            sc = self.scene()
+            g = float(sc.grid_size) if sc is not None and sc.snap_enabled else 0.0
+            if g > 0:           # taille minimale sur la grille pendant un redimensionnement
+                nw, nh = math.ceil(nw / g - 1e-6) * g, math.ceil(nh / g - 1e-6) * g
+            w, h = max(w, nw), max(h, nh)
+        super().set_size(w, h)
+
+    def fit_to_text(self, exact=False):
+        """Agrandit le bloc (ou, exact=True, le met juste à la taille du texte) en gardant son centre.
+        Renvoie True si la taille a changé."""
+        nw, nh = self.text_need()
+        tw, th = (nw, nh) if exact else (max(self.w, nw), max(self.h, nh))
+        sc = self.scene()
+        g = float(sc.grid_size) if sc is not None and sc.snap_enabled else 0.0
+        dw, dh = tw - self.w, th - self.h
+        if g > 0:   # variation multiple de 2 × grille : les bords restent sur la grille
+            dw = math.ceil(dw / (2 * g) - 1e-6) * 2 * g
+            dh = math.ceil(dh / (2 * g) - 1e-6) * 2 * g
+        if abs(dw) < 1e-6 and abs(dh) < 1e-6:
+            return False
+        old = sc.suspend_snap if sc is not None else None
+        if sc is not None:
+            sc.suspend_snap = True
+        self.setPos(self.pos() - QPointF(dw / 2, dh / 2))
+        if sc is not None:
+            sc.suspend_snap = old
+        NodeItem.set_size(self, self.w + dw, self.h + dh)
+        return True
+
+    def on_props_changed(self):
+        if self.fit_active():
+            self.fit_to_text()
+
     def _stack_count(self):
         return max(0, int(self.stack or 0))
 
@@ -512,10 +576,9 @@ class BlockItem(NodeItem):
         painter.setPen(pen)
         painter.setBrush(fill)
         painter.drawRoundedRect(self.rect(), r, r)
-        painter.setFont(CFG.font(self.text_size(), self.bold, self.italic))
         painter.setPen(QColor(self.text_color))
-        painter.drawText(self.rect().adjusted(4, 1, -4, -1),
-                         int(Qt.AlignCenter | Qt.TextWordWrap), self.text)
+        richtext.draw(painter, self.rect().adjusted(4, 1, -4, -1), self.text, self.text_size(),
+                      self.bold, self.italic, Qt.AlignHCenter, wrap=True)
         painter.setOpacity(op0)
         self.paint_selection(painter)
 
@@ -618,10 +681,9 @@ class TextItem(NodeItem):
         return int(h | Qt.AlignVCenter)
 
     def on_props_changed(self):
-        fm = QFontMetricsF(CFG.font(self.text_size(), self.bold, self.italic))
-        r = fm.boundingRect(QRectF(0, 0, 1e5, 1e5), self._flags(), self.text or " ")
-        self.w = r.width() + 2 * self.PAD
-        self.h = r.height() + 2 * self.PAD
+        tw, th = richtext.measure(self.text or " ", self.text_size(), self.bold, self.italic)
+        self.w = tw + 2 * self.PAD
+        self.h = th + 2 * self.PAD
 
     def set_prop(self, name, value):
         sc = self.scene()
@@ -642,10 +704,10 @@ class TextItem(NodeItem):
         if skip_paint(self):
             return
         painter.setRenderHint(QPainter.Antialiasing)
-        painter.setFont(CFG.font(self.text_size(), self.bold, self.italic))
         painter.setPen(ink(self, self.color))
-        painter.drawText(self.rect().adjusted(self.PAD, self.PAD, -self.PAD, -self.PAD),
-                         self._flags(), self.text)
+        h = {"left": Qt.AlignLeft, "right": Qt.AlignRight}.get(self.align, Qt.AlignHCenter)
+        richtext.draw(painter, self.rect().adjusted(self.PAD, self.PAD, -self.PAD, -self.PAD),
+                      self.text, self.text_size(), self.bold, self.italic, h)
         self.paint_selection(painter)
 
 
@@ -832,9 +894,8 @@ class GroupItem(NodeItem):
     def label_rect(self):
         if not self.label or self.label_pos == "none":
             return QRectF()
-        fm = QFontMetricsF(CFG.font(self.text_size()))
-        br = fm.boundingRect(QRectF(0, 0, 1e5, 1e5), int(Qt.AlignLeft | Qt.AlignTop), self.label)
-        tw, th, gap = br.width(), br.height(), 8.0
+        tw, th = richtext.measure(self.label, self.text_size())
+        gap = 8.0
         pos = self.label_pos
         if pos == "left":
             return QRectF(-gap - tw, (self.h - th) / 2, tw, th)
@@ -884,9 +945,8 @@ class GroupItem(NodeItem):
         painter.drawRoundedRect(self.rect(), r, r)
         lr = self.label_rect()
         if not lr.isNull():
-            painter.setFont(CFG.font(self.text_size()))
             painter.setPen(ink(self, st["text_color"]))
-            painter.drawText(lr, int(Qt.AlignLeft | Qt.AlignTop), self.label)
+            richtext.draw(painter, lr, self.label, self.text_size(), halign=Qt.AlignLeft)
         self.paint_selection(painter)
 
 

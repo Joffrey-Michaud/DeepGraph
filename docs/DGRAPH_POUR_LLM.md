@@ -37,7 +37,7 @@ les cadres des groupes et les côtés des flèches.
 Réglages globaux (facultatifs), à côté de `nodes` et `arrows` :
 
 ```json
-"settings": {"font": "TeX Gyre Termes", "font_size": 13, "border_width": 1.6, "arrow_width": 1.6}
+"settings": {"font": "TeX Gyre Termes", "font_size": 13, "border_width": 1.6, "arrow_width": 1.6, "fit_text": true}
 ```
 
 | clé | défaut | rôle |
@@ -46,6 +46,7 @@ Réglages globaux (facultatifs), à côté de `nodes` et `arrows` :
 | `font_size` | 13 | taille globale du texte (px) des blocs et textes sans `font_size` propre ; étiquettes de groupe sans `label_size` : cette taille + 2 |
 | `border_width` | 1.6 | épaisseur des bords des blocs |
 | `arrow_width` | 1.6 | épaisseur des flèches |
+| `fit_text` | false | `true` : l'éditeur agrandit les blocs dont le texte déborderait (conseillé : tu n'as plus à calculer `w` / `h` au pixel près) |
 
 Ne les mets que si l'utilisateur demande une police, une taille de texte ou des épaisseurs particulières (par exemple
 une police à empattements pour suivre le texte d'un article).
@@ -86,7 +87,7 @@ Propriétés d'un bloc (`"type": "block"`, toutes facultatives) :
 
 | clé | type | défaut | rôle |
 |---|---|---|---|
-| `text` | texte | `"Bloc"` | texte centré, `\n` pour aller à la ligne |
+| `text` | texte | `"Bloc"` | texte centré, `\n` pour aller à la ligne, formules entre `$…$` (voir ci-dessous) |
 | `color` | `"#RRGGBB"` | `"#FFFFFF"` | couleur de fond |
 | `w`, `h` | nombre | 110, 28 | largeur, hauteur (px) |
 | `font_size` | entier ou null | null | taille du texte (px) ; null ou absent = taille globale (`settings.font_size`) |
@@ -154,6 +155,29 @@ Usages : bloc répété N fois (`"label": "N×"` à gauche, comme le Transformer
 réseau (`"label": "Encoder"`, `label_pos: "top"`), panneau de détail (`fill: "#FFFFFF"`,
 `border_style: "dashed"`).
 
+### 3.7 Formules dans les textes
+
+Dans `text` (blocs, textes libres) et `label` (groupes), tout ce qui est entre `$…$` est une formule
+en syntaxe LaTeX simplifiée (aucune installation de LaTeX). Hors des `$`, le texte est affiché tel
+quel (`conv2_x` reste `conv2_x`) ; `\$` affiche un dollar. Dans le JSON, double les `\` :
+`"text": "Attention $\\frac{QK^\\top}{\\sqrt{d_k}}$"`.
+
+| écrire | donne |
+|---|---|
+| `x_t`, `x_{t-1}`, `W^Q`, `x_i^2` | indices / exposants (un caractère ou `{groupe}`) |
+| `\frac{a}{b}`, `\sqrt{d_k}` | fraction, racine |
+| `\alpha` … `\omega`, `\Gamma` … `\Omega`, `\epsilon`, `\varepsilon` | lettres grecques |
+| `\hat{x}`, `\tilde{x}`, `\bar{x}`, `\vec{v}`, `\dot{x}`, `\overline{AB}` | accents |
+| `\mathbf{W}`, `\mathbb{R}`, `\text{…}` / `\mathrm{…}` | gras, ensembles, texte droit |
+| `\times \cdot \odot \oplus \otimes \in \to \leq \geq \approx \infty \sum \top \|` | symboles |
+| `\exp \log \tanh \max \min \mathrm{softmax}` | fonctions (droites) |
+| `\, \; \quad` | espaces |
+
+Les lettres latines sont en italique (comme en LaTeX), les espaces écrites sont conservées. Usage
+typique : `"Linear $d \\to 4d$"`, `"$\\epsilon_\\theta(x_t, t)$"`, `"Encoder\n$\\times N$"`,
+entrées / sorties `"$x_t$"`, `"$\\hat{x}_0$"`. Avec `"settings": {"fit_text": true}`, les blocs
+s'agrandissent si la formule est plus haute que le bloc.
+
 ## 4. Flèches (`arrows`)
 
 ```json
@@ -175,9 +199,10 @@ Options :
 
 | clé | défaut | valeurs |
 |---|---|---|
-| `style` | `"straight"` | `straight` (segment droit), `ortho1` (1 angle), `ortho2` (2 angles) |
+| `style` | `"straight"` | `straight` (segment droit), `ortho1` (1 angle), `ortho2` (2 angles), `auto` (orthogonal, **contourne les blocs** tout seul), `free` (coudes libres, voir `bends`) |
 | `first` | `"auto"` | `h` ou `v` : direction du **premier** segment pour `ortho1` / `ortho2` |
 | `mid` | null | `ortho2` : position du segment du milieu, **décalage en px depuis le départ** le long de `first` (ex. `first: "h", mid: 80` → part de 80 px vers la droite ; `-80` vers la gauche) |
+| `bends` | `[]` | `free` : coordonnées successives des segments intérieurs, relatives au départ, axes alternés à partir de `first` (`first: "h", bends: [90]` = comme `ortho2` avec `mid: 90`) ; rarement utile à écrire à la main |
 | `head` | `"end"` | `end`, `start`, `both`, `none` |
 | `dashed` | false | pointillés |
 | `color` | `"#000000"` | couleur |
@@ -185,7 +210,10 @@ Options :
 Choisir le style :
 - éléments **alignés** (même `cx` ou même `cy`) → `straight` ;
 - décalés en x et en y → `ortho1` (`first: "v"` = d'abord vertical puis horizontal) ;
-- **connexion résiduelle / contournement** : `ortho2` avec `first: "h"` et `mid` (±70 à ±110 px)
+- **connexion qui doit passer à côté de blocs** (résiduelle, skip connection du U-Net, retour en
+  arrière) : `"style": "auto"` — l'éditeur trouve le chemin orthogonal qui contourne les blocs,
+  ex. `{"from": "j1", "to": {"node": "add1", "side": "right"}, "style": "auto"}` ;
+- ou, pour imposer la distance : `ortho2` avec `first: "h"` et `mid` (±70 à ±110 px)
   depuis une jonction jusqu'au côté de l'opérateur `+` ;
   ex. `{"from": "j1", "to": {"node": "add1", "side": "right"}, "style": "ortho2", "first": "h", "mid": 90}` ;
 - branches parallèles depuis un bloc large : `straight` avec `at` différents sur les deux blocs.
@@ -288,7 +316,7 @@ Attention à plusieurs entrées (V, K, Q en bas d'un bloc, flux bas → haut) :
 - [ ] Les groupes n'ont pas de `cx` / `cy` ; leurs enfants ont des coordonnées absolues.
 - [ ] Aucune paire d'éléments ne se chevauche (centre ± moitié de la taille, en comptant ~7 px
       par caractère pour les textes).
-- [ ] Les flèches `straight` relient des éléments alignés ; sinon `ortho1` / `ortho2`.
+- [ ] Les flèches `straight` relient des éléments alignés ; sinon `ortho1` / `ortho2` / `auto`.
 - [ ] Le flux (`forward`) est respecté : chaque tenseur réutilisé part d'une **jonction** ; chaque
       `torch.cat` → `op_concat`, chaque addition résiduelle → `op_plus`.
 - [ ] Les dimensions (canaux, longueur, résolution) apparaissent là où elles aident à lire.
@@ -297,7 +325,7 @@ Attention à plusieurs entrées (V, K, Q en bas d'un bloc, flux bas → haut) :
 
 L'éditeur enregistre une version développée du même fichier : `uid` entiers, `x`/`y` = coin
 haut-gauche (relatif au groupe parent pour un enfant, avec `"parent": uid`), flèches avec
-`{"node": uid, "fx": 0–1, "fy": 0–1}`, plus `"settings"` (épaisseurs, police, taille du texte) et `"layers"`
+`{"node": uid, "fx": 0–1, "fy": 0–1}`, plus `"settings"` (épaisseurs, police, taille du texte, ajustement au texte) et `"layers"`
 (calques). Les deux formes sont acceptées à l'ouverture ; **écris toujours la forme simplifiée**.
 
 ---

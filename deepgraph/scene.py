@@ -44,6 +44,7 @@ class DiagramScene(LayersMixin, QGraphicsScene):
         self.border_width = float(CFG.style["border_width"])
         self.arrow_width = float(CFG.style["arrow_width"])
         self.font_size = int(CFG.style["font_size"])        # taille globale du texte (px)
+        self.fit_text = True              # blocs agrandis pour que leur texte ne déborde pas
         self.dark = False  # mode sombre (affichage seulement, jamais à l'export)
         self._init_layers()
         self._hl_layer = None      # calque survolé dans le panneau (surbrillance)
@@ -113,6 +114,8 @@ class DiagramScene(LayersMixin, QGraphicsScene):
                 it.bold, it.stack = d.bold, d.stack
             it.def_id = bid
         self.add_node(it, center)
+        if isinstance(it, BlockItem) and self.fit_text:
+            it.fit_to_text()
         self.update_membership([it])
         if isinstance(it, GroupItem):
             self.adopt_contained(it)
@@ -399,6 +402,15 @@ class DiagramScene(LayersMixin, QGraphicsScene):
         if len(sel) == 1:
             self.edit_item(sel[0])
 
+    def fit_selected_to_text(self):
+        """Met les blocs sélectionnés juste à la taille de leur texte (agrandit ou réduit)."""
+        blocks = [n for n in self.selectedItems() if isinstance(n, BlockItem)]
+        changed = [b for b in blocks if b.fit_to_text(exact=True)]
+        if changed:
+            self.checkpoint()
+            self.itemsEdited.emit()
+        return len(blocks)
+
     def set_style_of_selected_arrows(self, style):
         arrows = [a for a in self.selectedItems() if isinstance(a, ArrowItem)]
         for a in arrows:
@@ -426,6 +438,8 @@ class DiagramScene(LayersMixin, QGraphicsScene):
             n.prepareGeometryChange()
             if isinstance(n, TextItem):
                 n.on_props_changed()
+            elif isinstance(n, BlockItem) and self.fit_text:
+                n.fit_to_text()
             n.update_arrows()
         for a in self.arrows():
             a.update_path()
@@ -433,7 +447,8 @@ class DiagramScene(LayersMixin, QGraphicsScene):
 
     # ------------------------------------------------------- réglages globaux
     def settings(self):
-        d = {"border_width": self.border_width, "arrow_width": self.arrow_width, "font_size": self.font_size}
+        d = {"border_width": self.border_width, "arrow_width": self.arrow_width, "font_size": self.font_size,
+             "fit_text": self.fit_text}
         if CFG.family_override:
             d["font"] = CFG.family_override
         return d
@@ -464,14 +479,14 @@ class DiagramScene(LayersMixin, QGraphicsScene):
         return getattr(self, key)
 
     def set_global(self, key, value):
-        if key not in ("border_width", "arrow_width", "font_size"):
+        if key not in ("border_width", "arrow_width", "font_size", "fit_text"):
             return
-        value = int(value) if key == "font_size" else float(value)
+        value = int(value) if key == "font_size" else bool(value) if key == "fit_text" else float(value)
         if getattr(self, key) == value:
             return
         setattr(self, key, value)
-        if key == "font_size":
-            self.refresh_style()          # textes re-mesurés, groupes réajustés
+        if key in ("font_size", "fit_text"):
+            self.refresh_style()          # textes re-mesurés, blocs ajustés, groupes réajustés
         else:
             self._refresh_widths()
         self.checkpoint()
@@ -482,6 +497,7 @@ class DiagramScene(LayersMixin, QGraphicsScene):
         self.border_width = float(st.get("border_width", CFG.style["border_width"]))
         self.arrow_width = float(st.get("arrow_width", CFG.style["arrow_width"]))
         self.font_size = int(st.get("font_size", CFG.style["font_size"]))
+        self.fit_text = bool(st.get("fit_text", False))       # ancien fichier : tailles inchangées
         if (st.get("font") or None) != CFG.family_override:
             CFG.set_family_override(st.get("font") or None)
             self.refresh_style()
@@ -923,11 +939,18 @@ class DiagramScene(LayersMixin, QGraphicsScene):
     def current_state(self):
         return self._undo[self._undo_i]
 
+    def reroute(self):
+        """Les flèches automatiques contournent les blocs : à recalculer quand un bloc bouge."""
+        for a in self.arrows():
+            if a.style == "auto":
+                a.update_path()
+
     def checkpoint(self):
         if self._temp is not None:
             return
         if not (QApplication.mouseButtons() & Qt.LeftButton and self.mouseGrabberItem() is not None):
             self.refit_groups()
+            self.reroute()
         s = self.state()
         if self._undo_i >= 0 and self._undo[self._undo_i] == s:
             return
@@ -988,6 +1011,10 @@ class DiagramScene(LayersMixin, QGraphicsScene):
             self.from_dict(data)
         finally:
             self._loading = False
+        if self.fit_text:                 # fichier écrit à la main / par un LLM : blocs à la bonne taille
+            for n in self.nodes():
+                if isinstance(n, BlockItem):
+                    n.fit_to_text()
         self.layersChanged.emit()
         self._undo, self._undo_i = [], -1
         self.checkpoint()

@@ -151,6 +151,7 @@ class DiagramView(QGraphicsView):
         sc = self.scene()
         if sc.mode != "select" or not self.context_actions:
             return
+        sc.context_pos = self.mapToScene(e.pos())     # pour « ajouter un coude ici »
         it = self.itemAt(e.pos())
         if it is not None and not it.isSelected():
             sc.clearSelection()

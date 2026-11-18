@@ -1,4 +1,5 @@
-"""Flèches ancrées sur les éléments : droites, 1 angle (L) ou 2 angles (Z / U)."""
+"""Flèches ancrées sur les éléments : droites, 1 angle (L), 2 angles (Z / U),
+automatiques (contournent les blocs) ou à coudes libres (autant de segments que voulu)."""
 import math
 
 from PyQt5.QtCore import Qt, QRectF, QPointF
@@ -6,9 +7,11 @@ from PyQt5.QtGui import QPen, QColor, QPainter, QPainterPath, QPainterPathStroke
 from PyQt5.QtWidgets import QGraphicsItem
 
 from .config import CFG
-from .items import SEL_COLOR, global_width, ink, is_exporting, skip_paint
+from .items import SEL_COLOR, BlockItem, OperatorItem, global_width, ink, is_exporting, skip_paint
+from .routing import route
 
-STYLES = [("straight", "Droite"), ("ortho1", "1 angle"), ("ortho2", "2 angles")]
+STYLES = [("straight", "Droite"), ("ortho1", "1 angle"), ("ortho2", "2 angles"),
+          ("auto", "Automatique (contourne les blocs)"), ("free", "Coudes libres")]
 FIRSTS = [("auto", "Auto"), ("v", "Vertical d'abord"), ("h", "Horizontal d'abord")]
 HEADS = [("end", "À la fin"), ("start", "Au début"), ("both", "Aux deux bouts"), ("none", "Aucune")]
 
@@ -84,6 +87,40 @@ def project_on_segment(p, a, b):
     return q, _len(p, q)
 
 
+def other_axis(a):
+    return "h" if a == "v" else "v"
+
+
+def coord(p, axis):
+    """Coordonnée fixée par un déplacement selon axis (« v » -> y, « h » -> x)."""
+    return p.y() if axis == "v" else p.x()
+
+
+def free_points(p1, p2, first, bends):
+    """Coudes libres : bends = coordonnées successives (relatives à p1), axes alternés à partir de
+    first ; deux derniers segments ajoutés pour rejoindre p2. 0 coude = 1 angle, 1 = 2 angles."""
+    pts, cur, ax = [QPointF(p1)], QPointF(p1), first
+    for c in bends:
+        cur = QPointF(cur.x(), p1.y() + c) if ax == "v" else QPointF(p1.x() + c, cur.y())
+        pts.append(cur)
+        ax = other_axis(ax)
+    pts.append(QPointF(cur.x(), p2.y()) if ax == "v" else QPointF(p2.x(), cur.y()))
+    pts.append(QPointF(p2))
+    return pts
+
+
+def bends_from_polyline(pts):
+    """(first, bends) qui reproduisent une polyligne orthogonale."""
+    pts = simplify(pts)
+    p1 = pts[0]
+    first = axis_of(pts[0], pts[1]) if len(pts) >= 2 else "v"
+    bends, ax = [], first
+    for q in pts[1:-2]:
+        bends.append(round(coord(q, ax) - coord(p1, ax), 2))
+        ax = other_axis(ax)
+    return first, bends
+
+
 def heads_split(head):
     return head in ("start", "both"), head in ("end", "both")
 
@@ -118,7 +155,7 @@ class Endpoint:
 class ArrowItem(QGraphicsItem):
     kind = "arrow"
     label_fr = "Flèche"
-    SAVE = ["style", "first", "mid", "head", "width", "color", "dashed"]
+    SAVE = ["style", "first", "mid", "bends", "head", "width", "color", "dashed"]
     PROPS = [
         ("style", "Tracé", "choice", STYLES),
         ("first", "Premier segment", "choice", FIRSTS),
@@ -137,6 +174,7 @@ class ArrowItem(QGraphicsItem):
         self.style = style
         self.first = "auto"
         self.mid = None
+        self.bends = []            # style « free » : coordonnées des segments intérieurs
         self.head = "end"
         self.width = None          # None = épaisseur globale du diagramme
         self.color = st["arrow_color"]
@@ -216,11 +254,37 @@ class ArrowItem(QGraphicsItem):
             m = max(m, a2 + clear)
         return m
 
+    def route_auto(self, p1, p2):
+        sc = self.scene()
+        if sc is None:
+            return None
+        d1, d2 = self.src.direction(), self.dst.direction()
+        rects = []
+        for n in sc.nodes():
+            if not isinstance(n, (BlockItem, OperatorItem)) or not n.isVisible():
+                continue
+            if (n is self.src.node and d1 is None) or (n is self.dst.node and d2 is None):
+                continue                           # ancré au centre : on part de l'intérieur
+            rects.append(n.scene_frame())
+        margin = max(10.0, 2 * float(sc.grid_size))
+        return route(p1, d1, p2, d2, rects, margin)
+
     def compute_points(self):
         p1, p2 = self.src.pos(), self.dst.pos()
         if self.style == "straight":
             return [p1, p2]
+        if self.style == "auto":
+            pts = self.route_auto(p1, p2)
+            if pts is not None:
+                return pts
+            first = self.resolved_first()
+            m = self.mid_coord(p1, p2, first)
+            if first == "v":
+                return [p1, QPointF(p1.x(), m), QPointF(p2.x(), m), p2]
+            return [p1, QPointF(m, p1.y()), QPointF(m, p2.y()), p2]
         first = self.resolved_first()
+        if self.style == "free":
+            return free_points(p1, p2, first, [float(c) for c in (self.bends or [])])
         if self.style == "ortho1":
             corner = QPointF(p1.x(), p2.y()) if first == "v" else QPointF(p2.x(), p1.y())
             return [p1, corner, p2]
@@ -286,6 +350,13 @@ class ArrowItem(QGraphicsItem):
         if len(self._raw) < 2:
             return {}
         d = {"src": self._raw[0], "dst": self._raw[-1]}
+        if self.style in ("free", "auto"):
+            pts = self._raw if self.style == "free" else simplify(self._raw)
+            n = len(pts) - 3 if self.style == "free" else len(pts) - 3
+            for k in range(1, n + 1):
+                a, b = pts[k], pts[k + 1]
+                d[f"seg{k}"] = QPointF((a.x() + b.x()) / 2, (a.y() + b.y()) / 2)
+            return d
         if self.style == "ortho1" and len(self._raw) == 3:
             d["corner"] = self._raw[1]
         elif self.style == "ortho2" and len(self._raw) == 4:
@@ -327,7 +398,7 @@ class ArrowItem(QGraphicsItem):
             painter.setPen(pen)
             painter.setBrush(QColor("white"))
             for name, q in self.handle_points().items():
-                if name in ("mid", "corner"):
+                if name in ("mid", "corner") or name.startswith("seg"):
                     painter.setBrush(SEL_COLOR)
                     painter.drawRect(QRectF(q.x() - 4.5, q.y() - 4.5, 9, 9))
                     painter.setBrush(QColor("white"))
@@ -336,10 +407,95 @@ class ArrowItem(QGraphicsItem):
 
     # propriétés ------------------------------------------------------------------
     def set_prop(self, name, value):
+        if name == "style" and value == "free" and self.style != "free":
+            self.to_free()                    # même tracé, mais chaque segment devient déplaçable
+            return
         if name in ("style", "first"):
             self.mid = None
+            if name == "first" and self.style == "free":
+                self.bends = []
         setattr(self, name, value)
         self.update_path()
+
+    # coudes libres ---------------------------------------------------------------
+    def to_free(self):
+        """Fige le tracé actuel en « coudes libres »."""
+        pts = simplify(self._raw) if self._raw else self.compute_points()
+        if len(pts) == 2 and abs(pts[0].x() - pts[1].x()) > 1e-6 and abs(pts[0].y() - pts[1].y()) > 1e-6:
+            first = self.resolved_first() if self.style != "straight" else axis_of(pts[0], pts[1])
+            bends = []
+        else:
+            first, bends = bends_from_polyline(pts)
+        self.style, self.first, self.bends, self.mid = "free", first, bends, None
+        self.update_path()
+
+    def _segments(self):
+        """Segments du tracé « free » : (k, a, b) pour k = 0 … n+1."""
+        pts = self._raw
+        return [(k, pts[k], pts[k + 1]) for k in range(len(pts) - 1)]
+
+    def _nearest_segment(self, q):
+        best = None
+        for k, a, b in self._segments():
+            _, dist = project_on_segment(q, a, b)
+            if best is None or dist < best[1]:
+                best = (k, dist)
+        return best[0] if best else None
+
+    def add_bend(self, q):
+        """Coupe le segment le plus proche de q en deux morceaux déplaçables séparément."""
+        if self.style != "free":
+            self.to_free()
+        k = self._nearest_segment(q)
+        if k is None:
+            return False
+        p1 = self.src.pos()
+        first = self.first if self.first in ("h", "v") else self.resolved_first()
+        n = len(self.bends)
+        a = self._raw[k]
+        travel = first if k % 2 == 0 else other_axis(first)       # axe de déplacement du segment k
+        perp = other_axis(travel)
+        t = coord(q, travel) - coord(p1, travel)
+        sc = self.scene()
+        if sc is not None and sc.snap_enabled:
+            g = float(sc.grid_size)
+            t = round((coord(q, travel)) / g) * g - coord(p1, travel)
+        here = coord(a, perp) - coord(p1, perp)
+        if k <= n:
+            self.bends[k:k] = [round(t, 2), round(here, 2)]
+        else:                                                        # dernier segment (vers p2)
+            self.bends += [round(here, 2), round(t, 2)]
+        self.first = first
+        self.update_path()
+        return True
+
+    def remove_bend(self, q):
+        """Supprime le segment intérieur le plus proche de q (les voisins se rejoignent)."""
+        if self.style != "free" or not self.bends:
+            return False
+        k = self._nearest_segment(q)
+        n = len(self.bends)
+        k = max(1, min(n, k))
+        if k < n:
+            del self.bends[k - 1:k + 1]
+        else:
+            del self.bends[k - 1]
+        self.update_path()
+        return True
+
+    def drag_segment(self, k, p, snap, g):
+        if self.style != "free":
+            self.to_free()
+        p1 = self.src.pos()
+        first = self.first if self.first in ("h", "v") else self.resolved_first()
+        ax = first if k % 2 == 1 else other_axis(first)              # axe de la coordonnée c_k
+        c = coord(p, ax)
+        if snap:
+            c = round(c / g) * g
+        if 1 <= k <= len(self.bends):
+            self.bends[k - 1] = round(c - coord(p1, ax), 2)
+            self.first = first
+            self.update_path()
 
     def to_dict(self, nodeset=None):
         def ep(e):
@@ -363,7 +519,7 @@ class ArrowItem(QGraphicsItem):
 
     def hoverMoveEvent(self, e):
         h = self._handle_at(e.scenePos())
-        if h == "mid":
+        if h == "mid" or (h or "").startswith("seg"):
             self.setCursor(Qt.SizeAllCursor)
         elif h:
             self.setCursor(Qt.SizeAllCursor if h == "corner" else Qt.CrossCursor)
@@ -407,6 +563,9 @@ class ArrowItem(QGraphicsItem):
             return
         if self._drag == "mid":
             self.drag_mid(p, snap, g)
+            return
+        if self._drag and self._drag.startswith("seg"):
+            self.drag_segment(int(self._drag[3:]), p, snap, g)
             return
         if self._drag == "move":
             d = p - self._last
@@ -452,7 +611,7 @@ class ArrowItem(QGraphicsItem):
 
     def mouseReleaseEvent(self, e):
         was, self._drag = self._drag, None
-        if was in ("src", "dst", "mid", "corner"):
+        if was in ("src", "dst", "mid", "corner") or (was or "").startswith("seg"):
             e.accept()
             return
         super().mouseReleaseEvent(e)

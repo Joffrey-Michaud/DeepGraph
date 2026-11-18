@@ -1,8 +1,8 @@
 """Export PDF / SVG / PNG (vectoriel pour PDF et SVG)."""
 import math
 
-from PyQt5.QtCore import Qt, QMarginsF, QRectF, QSize, QSizeF
-from PyQt5.QtGui import QImage, QPageLayout, QPageSize, QPainter, QPdfWriter
+from PyQt5.QtCore import QBuffer, QByteArray, QIODevice, QMarginsF, QMimeData, QRectF, QSize, QSizeF, Qt
+from PyQt5.QtGui import QGuiApplication, QImage, QPageLayout, QPageSize, QPainter, QPdfWriter
 from PyQt5.QtSvg import QSvgGenerator
 
 from .arrow import ArrowItem
@@ -31,6 +31,36 @@ def _render(scene, painter, target, source):
 
 
 def export_scene(scene, path, fmt, scale=4.0, transparent=False, only=None, margin=4.0):
+    """Écrit le diagramme (ou only = les éléments donnés) dans un fichier PDF / SVG / PNG."""
+    res = _export(scene, path, fmt, scale, transparent, only, margin)
+    if fmt == "png" and not res.save(path, "PNG"):
+        raise IOError(f"Impossible d'écrire {path}")
+
+
+def render_bytes(scene, fmt, scale=4.0, transparent=False, only=None, margin=4.0):
+    """Même rendu qu'export_scene, en mémoire : renvoie les octets (PNG : renvoie la QImage)."""
+    if fmt == "png":
+        return _export(scene, None, fmt, scale, transparent, only, margin)
+    buf = QBuffer()
+    buf.open(QIODevice.WriteOnly)
+    _export(scene, buf, fmt, scale, transparent, only, margin)
+    buf.close()
+    return bytes(buf.data())
+
+
+def copy_scene_image(scene, only=None, scale=4.0, transparent=False):
+    """Presse-papiers : PNG (applications courantes), SVG et PDF (vectoriels : Inkscape, LibreOffice…)."""
+    img = render_bytes(scene, "png", scale, transparent, only)
+    md = QMimeData()
+    md.setImageData(img)
+    for fmt, mime in (("svg", "image/svg+xml"), ("pdf", "application/pdf")):
+        md.setData(mime, QByteArray(render_bytes(scene, fmt, only=only)))
+    QGuiApplication.clipboard().setMimeData(md)
+    return img
+
+
+def _export(scene, target, fmt, scale, transparent, only, margin):
+    """target : chemin de fichier ou QIODevice (ignoré pour le PNG, qui renvoie la QImage)."""
     items, keep = _collect(scene, only)
     if not items:
         raise ValueError("Rien à exporter.")
@@ -47,7 +77,10 @@ def export_scene(scene, path, fmt, scale=4.0, transparent=False, only=None, marg
         w, h = rect.width(), rect.height()
         if fmt == "svg":
             gen = QSvgGenerator()
-            gen.setFileName(path)
+            if isinstance(target, str):
+                gen.setFileName(target)
+            else:
+                gen.setOutputDevice(target)
             gen.setResolution(72)
             gen.setSize(QSize(math.ceil(w), math.ceil(h)))
             gen.setViewBox(QRectF(0, 0, w, h))
@@ -56,7 +89,7 @@ def export_scene(scene, path, fmt, scale=4.0, transparent=False, only=None, marg
             _render(scene, p, QRectF(0, 0, w, h), rect)
             p.end()
         elif fmt == "pdf":
-            wr = QPdfWriter(path)
+            wr = QPdfWriter(target)
             wr.setCreator("DeepGraph")
             wr.setPageSize(QPageSize(QSizeF(w, h), QPageSize.Point, "", QPageSize.ExactMatch))
             wr.setPageMargins(QMarginsF(0, 0, 0, 0), QPageLayout.Point)
@@ -74,8 +107,7 @@ def export_scene(scene, path, fmt, scale=4.0, transparent=False, only=None, marg
             p = QPainter(img)
             _render(scene, p, QRectF(0, 0, iw, ih), rect)
             p.end()
-            if not img.save(path, "PNG"):
-                raise IOError(f"Impossible d'écrire {path}")
+            return img
         else:
             raise ValueError(f"Format inconnu : {fmt}")
     finally:
