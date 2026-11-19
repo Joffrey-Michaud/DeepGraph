@@ -152,6 +152,8 @@ class MainWindow(QMainWindow):
                                   "Exporter tout le diagramme en PDF / SVG / PNG")
         self.a_export_sel = self._act("Exporter la sélection…", lambda: self.export(True), "Ctrl+Shift+E")
         self.a_png_transp = self._act("PNG : fond transparent", lambda on: None, checkable=True)
+        self.a_export_py = self._act("Exporter en code PyTorch…", self.export_pytorch, None,
+                                     "Squelette de code PyTorch (nn.Module) qui suit le schéma")
         self.a_quit = self._act("Quitter", self.close, QKeySequence.Quit)
 
         self.a_undo = self._act("Annuler", sc.undo, QKeySequence.Undo, icon=QStyle.SP_ArrowBack)
@@ -239,6 +241,9 @@ class MainWindow(QMainWindow):
         self.a_help_pytorch = self._act("Schéma depuis un modèle PyTorch…", self.show_pytorch_doc,
                                         tip="Fabriquer un brouillon de schéma à partir du code PyTorch d'un modèle "
                                             "(outils/depuis_pytorch.py)")
+        self.a_help_vers_pytorch = self._act("Code PyTorch depuis un schéma…", self.show_vers_pytorch_doc,
+                                             tip="Ce que fait Fichier > Exporter en code PyTorch, et comment "
+                                                 "écrire le schéma pour en tirer le plus")
         self.a_help_update = self._act("Rechercher des mises à jour…", self.check_updates)
         self.a_stack = self._act("Empiler (stack)…", self.stack_dialog,
                                  tip="Ajoute derrière le bloc des copies sans texte (style « ×h »)")
@@ -258,7 +263,7 @@ class MainWindow(QMainWindow):
         self.templates_menu.setToolTipsVisible(True)
         self.templates_menu.aboutToShow.connect(self._fill_templates_menu)
         for a in (self.a_save, self.a_save_as, None, self.a_export,
-                  self.a_export_sel, self.a_png_transp, None, self.a_quit):
+                  self.a_export_sel, self.a_png_transp, self.a_export_py, None, self.a_quit):
             m.addSeparator() if a is None else m.addAction(a)
         m = mb.addMenu("&Édition")
         for a in (self.a_undo, self.a_redo, None, self.a_cut, self.a_copy, self.a_copy_img, self.a_paste, self.a_dup,
@@ -299,6 +304,7 @@ class MainWindow(QMainWindow):
         m = mb.addMenu("Ai&de")
         m.addAction(self.a_help_guide)
         m.addAction(self.a_help_pytorch)
+        m.addAction(self.a_help_vers_pytorch)
         m.addAction(self.a_help_llm)
         m.addSeparator()
         m.addAction(self.a_help_update)
@@ -534,6 +540,12 @@ class MainWindow(QMainWindow):
                        f"Commande à lancer dans un terminal, depuis la racine du projet du modèle : "
                        f"python {tool} fichier.py:Classe -e x:1,3,224,224 -o brouillon.dgraph",
                        "DEPUIS_PYTORCH.md")
+
+    def show_vers_pytorch_doc(self):
+        self._show_doc("_vers_pytorch_doc", "Code PyTorch depuis un schéma", docs.vers_pytorch_doc(),
+                       "Menu Fichier > Exporter en code PyTorch…, ou dans un terminal : "
+                       f"python {os.path.join(docs.ROOT, 'outils', 'vers_pytorch.py')} schema.dgraph --essai",
+                       "VERS_PYTORCH.md")
 
     def show_user_guide(self):
         self._show_doc("_guide", "Guide d'utilisation — DeepGraph", docs.user_guide(), "", "DeepGraph_guide.md")
@@ -845,6 +857,46 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Export impossible", str(e))
             return
         self.statusBar().showMessage(f"Exporté : {path}", 5000)
+
+    def export_pytorch(self):
+        """Squelette PyTorch du schéma (deepgraph/codegen.py, voir docs/VERS_PYTORCH.md)."""
+        from .codegen import generate
+        base = os.path.splitext(self.current_file)[0] if self.current_file else os.path.join(self._dir(), "modele")
+        path, _ = QFileDialog.getSaveFileName(self, "Exporter en code PyTorch", base + ".py", "Python (*.py)")
+        if not path:
+            return
+        if not path.lower().endswith(".py"):
+            path += ".py"
+        defs = {bid: bd.pytorch for bid, bd in CFG.blocks.items() if bd.pytorch}
+        title = os.path.splitext(os.path.basename(self.current_file))[0] if self.current_file else ""
+        try:
+            code, info = generate(self.scene.to_dict(), defs, title)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(code)
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.critical(self, "Export PyTorch impossible", str(e))
+            return
+        if not info["main"]:
+            QMessageBox.warning(self, "Code PyTorch", "Aucun réseau trouvé : le schéma doit contenir des blocs "
+                                "reliés par des flèches.")
+            return
+        todo = (f"<p>{info['todo']} réglage(s) absent(s) du schéma, marqué(s) <b>TODO</b> dans le code.</p>"
+                if info["todo"] else "<p>Aucun réglage manquant.</p>")
+        box = QMessageBox(self)
+        box.setWindowTitle("Code PyTorch")
+        box.setIcon(QMessageBox.Information)
+        box.setText(f"<p><b>{os.path.basename(path)}</b> : {', '.join(info['classes'])}.</p>{todo}"
+                    f"<p>Brouillon qui suit le schéma, à relire. Pour l'essayer sur des entrées factices :<br>"
+                    f"<code>python {os.path.basename(path)}</code></p>")
+        b_open = box.addButton("Ouvrir le fichier", QMessageBox.ActionRole)
+        b_help = box.addButton("Aide…", QMessageBox.HelpRole)
+        box.addButton("Fermer", QMessageBox.RejectRole)
+        box.exec_()
+        if box.clickedButton() is b_open:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+        elif box.clickedButton() is b_help:
+            self.show_vers_pytorch_doc()
+        self.statusBar().showMessage(f"Code PyTorch : {path}", 5000)
 
     def closeEvent(self, e):
         if self.maybe_save():

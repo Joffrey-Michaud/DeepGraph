@@ -33,6 +33,8 @@
 #                    dot     point central                    (produit terme à terme)
 #                  ou n'importe quel texte court (ex. "σ", "C")
 #     id           identifiant unique (défaut = name) ; utile si deux blocs ont le même nom
+#     pytorch      module utilisé par Fichier > Exporter en code PyTorch, ex. "nn.LazyConv2d(64, 3)"
+#                  (facultatif : sans lui, le texte du bloc est interprété)
 #
 #  Les épaisseurs border_width / arrow_width ci-dessous sont les valeurs par défaut
 #  des nouveaux diagrammes ; elles se règlent ensuite dans la barre d'outils.

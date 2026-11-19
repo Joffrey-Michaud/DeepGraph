@@ -40,7 +40,7 @@ DEFAULT_STYLE = {
 }
 
 BLOCK_FIELDS = {"id", "name", "label", "color", "description", "category", "shape", "symbol",
-                "width", "height", "font_size", "text_color", "bold", "stack"}
+                "width", "height", "font_size", "text_color", "bold", "stack", "pytorch"}
 
 
 @dataclass
@@ -59,6 +59,7 @@ class BlockDef:
     text_color: Optional[str] = None
     bold: bool = False
     stack: int = 0
+    pytorch: str = ""            # constructeur PyTorch pour l'export en code (ex. nn.LazyConv2d(64, 3))
     origin: str = "base"         # base (blocks.yaml) | user (mes_blocs.yaml) | override (les deux)
 
 
@@ -267,7 +268,8 @@ def parse_blocks(raws, errors, source=""):
                 height=float(raw["height"]) if raw.get("height") else None,
                 font_size=int(raw["font_size"]) if raw.get("font_size") else None,
                 text_color=str(raw["text_color"]) if raw.get("text_color") else None,
-                bold=bool(raw.get("bold", False)), stack=int(raw.get("stack", 0) or 0))
+                bold=bool(raw.get("bold", False)), stack=int(raw.get("stack", 0) or 0),
+                pytorch=str(raw.get("pytorch") or "").strip())
         except (TypeError, ValueError) as e:
             errors.append(f"{where} ({name}) : valeur invalide ({e})")
             continue

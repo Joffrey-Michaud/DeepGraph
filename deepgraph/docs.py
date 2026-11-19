@@ -7,6 +7,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LLM_DOC = os.path.join(ROOT, "docs", "DGRAPH_POUR_LLM.md")
 README = os.path.join(ROOT, "README.md")
 PYTORCH_DOC = os.path.join(ROOT, "docs", "DEPUIS_PYTORCH.md")
+VERS_PYTORCH_DOC = os.path.join(ROOT, "docs", "VERS_PYTORCH.md")
 ANNEX = "## Annexe"
 
 
@@ -57,3 +58,7 @@ def user_guide():
 
 def pytorch_doc():
     return _read(PYTORCH_DOC)
+
+
+def vers_pytorch_doc():
+    return _read(VERS_PYTORCH_DOC)

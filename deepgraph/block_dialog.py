@@ -207,6 +207,12 @@ class BlockDialog(QDialog):
         self.stack.setToolTip("Copies dessinées derrière le bloc (effet « ×h » du Multi-Head Attention)")
         form.addRow("Copies empilées", self.stack)
 
+        self.pytorch = QLineEdit(v.get("pytorch", ""))
+        self.pytorch.setPlaceholderText("facultatif, ex. nn.LazyConv2d(64, 3, padding=1)")
+        self.pytorch.setToolTip("Module PyTorch utilisé pour ce bloc par Fichier > Exporter en code PyTorch.\n"
+                                "Vide : DeepGraph le déduit du texte du bloc, ou laisse un TODO.")
+        form.addRow("Code PyTorch", self.pytorch)
+
         # --- aperçu ---------------------------------------------------------------------
         prev = QGroupBox("Aperçu")
         pv = QVBoxLayout(prev)
@@ -294,7 +300,7 @@ class BlockDialog(QDialog):
     def _refresh(self):
         circle = self.r_circle.isChecked()
         self._set_row_visible(self.symbol, circle)
-        for w in (self.label, self.stack):
+        for w in (self.label, self.stack, self.pytorch):
             self._set_row_visible(w, not circle)
         # ligne « Texte » (couleur, gras, taille) : rectangles seulement
         for w in (self.b_text_color, self.bold, self.font_size, self.l_tc, self.l_fs):
@@ -367,6 +373,8 @@ class BlockDialog(QDialog):
                 v["height"] = self.height.value()
             if self.stack.value():
                 v["stack"] = self.stack.value()
+            if self.pytorch.text().strip():
+                v["pytorch"] = self.pytorch.text().strip()
         if self.width.value():
             v["width"] = self.width.value()
         d = self.desc.toPlainText().strip()
@@ -391,7 +399,7 @@ def values_from_def(bd):
         v["label"] = bd.label
     if bd.shape == "circle":
         v["symbol"] = bd.symbol
-    for k in ("width", "height", "font_size", "text_color", "stack"):
+    for k in ("width", "height", "font_size", "text_color", "stack", "pytorch"):
         if getattr(bd, k):
             v[k] = getattr(bd, k)
     if bd.bold:

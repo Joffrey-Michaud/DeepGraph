@@ -43,6 +43,8 @@ Puis **Fichier > Ouvrir** `brouillon.dgraph` dans DeepGraph.
 
 `python outils/depuis_pytorch.py -h` rappelle la liste.
 
+L'opération inverse (schéma → code PyTorch) est décrite dans [VERS_PYTORCH.md](VERS_PYTORCH.md).
+
 ## Recettes
 
 **Vue d'ensemble + détail des blocs** (le plus proche d'une figure d'article) :

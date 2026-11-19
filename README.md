@@ -37,6 +37,7 @@ python main.py --update             # installe la dernière release
 | Modèles types | **Fichier > Modèles types** : LeNet-5, AlexNet, VGG-16, Inception, ResNet-18, U-Net, Transformer, attention (fig. 2 de Vaswani et al.), ViT, VAE, GAN, MLP, seq2seq. Le modèle s'ouvre comme un nouveau document sans titre (jamais écrasé). Tout `.dgraph` déposé dans [modeles/](modeles/) apparaît aussi dans le menu ; `python outils/generer_modeles.py` régénère les modèles fournis |
 | Copier comme image | **Ctrl+Maj+C** (ou clic droit) : la sélection, ou tout le diagramme, dans le presse-papiers en PNG + SVG + PDF ; coller directement dans Word, LibreOffice, PowerPoint, Inkscape… (même échelle et même fond transparent que l'export PNG) |
 | Exporter | **Ctrl+E** → PDF / SVG / PNG ; **Ctrl+Maj+E** pour la sélection seule ; sans l'éditeur : `python outils/exporter.py` (voir plus bas) |
+| Code PyTorch | **Fichier > Exporter en code PyTorch…** : squelette `nn.Module` qui suit le schéma (voir plus bas) |
 | Police | barre d'outils « Police » (à côté de Bords / Flèches / Texte) : s'applique à tout le diagramme et aux exports, enregistrée dans le `.dgraph` ; « Défaut » = police de `blocks.yaml` ; « Autre police… » pour choisir parmi toutes les polices installées |
 | Épaisseurs | barre d'outils « Bords » / « Flèches » (tout le diagramme) ; par élément dans Propriétés, bouton « Défaut » pour revenir au global |
 | Blocs ajustés au texte | case de la barre d'outils (cochée pour les nouveaux diagrammes, décochée à l'ouverture d'un ancien fichier) : un bloc s'agrandit, en gardant son centre, dès que son texte déborderait (texte modifié, taille du texte, police) et ne peut pas être redimensionné plus petit que son texte. **Réduire aussi** (cochée par défaut) : quand le texte rétrécit, il revient vers sa taille d'origine (celle de la bibliothèque, ou la dernière taille donnée en le redimensionnant), jamais en dessous ; décochée, il ne fait que grandir. Clic droit > **Ajuster la taille au texte** (Ctrl+Maj+T) le met juste à la taille du texte |
@@ -91,6 +92,15 @@ le modèle une fois et en dessine la structure (blocs, liaisons, formes, « N× 
 sans LLM. `--detail Classe` ajoute l'intérieur d'une classe en encart. Documentation complète :
 **Aide > Schéma depuis un modèle PyTorch…** ou [docs/DEPUIS_PYTORCH.md](docs/DEPUIS_PYTORCH.md).
 
+## Code PyTorch depuis un schéma (prototype)
+
+**Fichier > Exporter en code PyTorch…** (ou `python outils/vers_pytorch.py schema.dgraph --essai`) écrit
+un `.py` avec une classe `nn.Module` par réseau : couches lues dans les blocs et leur texte
+(« Conv 7×7, 64, /2 », « BN + ReLU »), flèches, ⊕ / concaténations, cadres « N× » et cadres en
+pointillés (classes). Les modules « Lazy » déduisent les canaux d'entrée ; ce que le schéma ne dit pas
+est marqué `TODO`. Les 13 modèles types donnent un code qui s'exécute. Documentation :
+**Aide > Code PyTorch depuis un schéma…** ou [docs/VERS_PYTORCH.md](docs/VERS_PYTORCH.md).
+
 ## Générer un schéma avec un LLM
 
 Menu **Aide > Documentation pour LLM…** : « Copier tout », coller dans la conversation, puis donner le code du modèle (même texte que [docs/DGRAPH_POUR_LLM.md](docs/DGRAPH_POUR_LLM.md), avec la liste des blocs toujours à jour) : il produit un `.dgraph`
@@ -103,8 +113,9 @@ Ce guide est aussi affiché par **Aide > Guide d'utilisation** (F1).
 Bouton **« ＋ Nouveau bloc… »** sous la bibliothèque (ou menu Configuration > Nouveau bloc de
 bibliothèque) : une fenêtre demande le nom, le texte écrit dans le bloc, la catégorie (en choisir une
 ou en taper une nouvelle), la forme (rectangle ou cercle d'opération avec son symbole), la couleur, le
-texte (couleur, taille, gras), la taille, les copies empilées et une description, avec un aperçu en
-direct. Le bloc apparaît aussitôt dans la bibliothèque.
+texte (couleur, taille, gras), la taille, les copies empilées, une description et, si on le souhaite,
+le **code PyTorch** du bloc (utilisé par l'export en code), avec un aperçu en direct. Le bloc apparaît
+aussitôt dans la bibliothèque.
 
 | Action | Comment |
 |---|---|
