@@ -1,6 +1,10 @@
 # =============================================================================
 #  DeepGraph — bibliothèque de blocs
 # =============================================================================
+#  Pour ajouter ou modifier un bloc, le plus simple est le bouton « ＋ Nouveau bloc… » sous la
+#  bibliothèque (et le clic droit sur un bloc) : les blocs sont alors enregistrés dans
+#  mes_blocs.yaml, que les mises à jour ne touchent jamais.
+#
 #  Ce fichier est relu automatiquement dès qu'il est enregistré (ou avec F5).
 #
 #  Section « style »  : apparence globale (toutes les clés sont optionnelles).

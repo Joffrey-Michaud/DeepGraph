@@ -1,8 +1,8 @@
 """Panneau de gauche : bibliothèque de blocs issue du fichier YAML."""
 from PyQt5.QtCore import Qt, QMimeData, QSize, QPointF, QRectF, pyqtSignal
 from PyQt5.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QFont
-from PyQt5.QtWidgets import (QAbstractItemView, QHBoxLayout, QLabel, QLineEdit, QPushButton, QToolButton,
-                             QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
+from PyQt5.QtWidgets import (QAbstractItemView, QHBoxLayout, QLabel, QLineEdit, QMenu, QMessageBox,
+                             QPushButton, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from .config import CFG, description_html
 from .items import draw_symbol
@@ -79,7 +79,8 @@ class LibraryTree(QTreeWidget):
 class LibraryPanel(QWidget):
     activated = pyqtSignal(str)
     reloadRequested = pyqtSignal()
-    editRequested = pyqtSignal()
+    openFileRequested = pyqtSignal(str)     # ouvrir un fichier YAML dans l'éditeur de texte
+    changed = pyqtSignal()                  # mes_blocs.yaml réécrit : recharger la config
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -95,12 +96,23 @@ class LibraryPanel(QWidget):
         self.desc.setMinimumHeight(48)
         self.desc.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         row = QHBoxLayout()
-        b_reload = QPushButton("Recharger")
-        b_reload.setToolTip("Relire le fichier de configuration (F5)")
-        b_edit = QPushButton("Éditer la config")
-        b_edit.setToolTip("Ouvrir blocks.yaml dans l'éditeur par défaut")
-        row.addWidget(b_reload)
-        row.addWidget(b_edit)
+        b_new = QPushButton("＋ Nouveau bloc…")
+        b_new.setToolTip("Créer un bloc : nom, couleur, catégorie… Clic droit sur un bloc de la "
+                         "bibliothèque pour le modifier.")
+        b_more = QToolButton()
+        b_more.setText("⋯")
+        b_more.setToolTip("Recharger, fichiers de configuration (utilisateurs avancés)")
+        b_more.setPopupMode(QToolButton.InstantPopup)
+        more = QMenu(b_more)
+        more.addAction("Recharger la bibliothèque (F5)", self.reloadRequested.emit)
+        more.addSeparator()
+        more.addAction("Ouvrir mes_blocs.yaml (mes blocs)",
+                       lambda: self.openFileRequested.emit(CFG.user_path))
+        more.addAction("Ouvrir blocks.yaml (blocs fournis, style)",
+                       lambda: self.openFileRequested.emit(CFG.path))
+        b_more.setMenu(more)
+        row.addWidget(b_new, 1)
+        row.addWidget(b_more)
         top = QHBoxLayout()
         top.setSpacing(2)
         top.addWidget(self.search, 1)
@@ -129,8 +141,9 @@ class LibraryPanel(QWidget):
         self.search.textChanged.connect(self.apply_filter)
         self.tree.itemDoubleClicked.connect(self._on_double)
         self.tree.currentItemChanged.connect(self._on_current)
-        b_reload.clicked.connect(self.reloadRequested)
-        b_edit.clicked.connect(self.editRequested)
+        b_new.clicked.connect(lambda: self.new_block())
+        self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._context_menu)
         self.rebuild()
 
     def _category(self, name, cats):
@@ -167,8 +180,14 @@ class LibraryPanel(QWidget):
         cats = {}
         for bd in CFG.blocks.values():
             parent = self._category(bd.category, cats)
-            self._leaf(parent, bd.id, bd.name, bd.description,
-                       make_icon(bd.shape, bd.color, bd.symbol))
+            it = self._leaf(parent, bd.id, bd.name, bd.description,
+                            make_icon(bd.shape, bd.color, bd.symbol))
+            if bd.origin != "base":            # ajouté ou modifié par l'utilisateur
+                f = it.font(0)
+                f.setItalic(bd.origin == "override")
+                it.setFont(0, f)
+                it.setToolTip(0, it.toolTip(0) + ("<br><i>Bloc modifié (clic droit > Rétablir l'original)</i>"
+                                                  if bd.origin == "override" else "<br><i>Mon bloc</i>"))
         tools = self._category(TOOLS_CATEGORY, cats)
         for bid, name, desc in BUILTINS:
             kind = {"__text__": "text", "__junction__": "junction", "__group__": "group"}[bid]
@@ -202,3 +221,105 @@ class LibraryPanel(QWidget):
             return
         d = cur.data(0, Qt.UserRole + 1) or ""
         self.desc.setText(description_html(d, cur.text(0), summary_only=True))
+
+    # ------------------------------------------------------- blocs utilisateur
+    def _context_menu(self, pos):
+        it = self.tree.itemAt(pos)
+        menu = QMenu(self)
+        bid = it.data(0, Qt.UserRole) if it is not None else None
+        bd = CFG.blocks.get(bid) if bid else None
+        if bd is not None:
+            menu.addAction("Modifier…", lambda: self.edit_block(bd.id))
+            menu.addAction("Dupliquer…", lambda: self.duplicate_block(bd.id))
+            menu.addSeparator()
+            if bd.origin == "user":
+                menu.addAction("Supprimer de la bibliothèque", lambda: self.delete_block(bd.id))
+            elif bd.origin == "override":
+                menu.addAction("Rétablir l'original", lambda: self.revert_block(bd.id))
+            menu.addSeparator()
+            menu.addAction(f"Nouveau bloc dans « {bd.category} »…", lambda: self.new_block(bd.category))
+        elif it is not None and not bid and it.text(0) != TOOLS_CATEGORY:     # une catégorie
+            cat = it.text(0)
+            menu.addAction(f"Nouveau bloc dans « {cat} »…", lambda: self.new_block(cat))
+        else:
+            menu.addAction("Nouveau bloc…", lambda: self.new_block())
+        menu.exec_(self.tree.viewport().mapToGlobal(pos))
+
+    def _run_dialog(self, values, mode="new", origin="user"):
+        from .block_dialog import BlockDialog
+        dlg = BlockDialog(self.window(), values, mode, origin)
+        if dlg.exec_() != dlg.Accepted:
+            return None
+        raw = dlg.result_raw()
+        try:
+            CFG.save_user_block(raw, dlg.edit_id)
+        except OSError as e:
+            QMessageBox.warning(self, "Bibliothèque", f"Impossible d'enregistrer {CFG.user_path} :\n{e}")
+            return None
+        bid = str(raw.get("id", raw["name"]))
+        self.changed.emit()
+        self.select(bid)
+        return bid
+
+    def new_block(self, category=None, values=None):
+        v = dict(values or {})
+        if category:
+            v["category"] = category
+        return self._run_dialog(v)
+
+    def edit_block(self, bid):
+        from .block_dialog import values_from_def
+        bd = CFG.blocks.get(bid)
+        if bd is not None:
+            return self._run_dialog(values_from_def(bd), "edit", bd.origin)
+
+    def duplicate_block(self, bid):
+        from .block_dialog import values_from_def
+        bd = CFG.blocks.get(bid)
+        if bd is not None:
+            v = values_from_def(bd)
+            v.pop("id", None)
+            v["name"] = bd.name + " (copie)"
+            if "label" not in v:
+                v["label"] = bd.label
+            return self._run_dialog(v)
+
+    def delete_block(self, bid):
+        bd = CFG.blocks.get(bid)
+        if bd is None:
+            return
+        r = QMessageBox.question(self, "Supprimer le bloc",
+                                 f"Retirer « {bd.name} » de la bibliothèque ?\n"
+                                 "Les blocs déjà posés dans les schémas ne changent pas.")
+        if r == QMessageBox.Yes:
+            self._remove(bid)
+
+    def revert_block(self, bid):
+        bd = CFG.base_blocks.get(bid)
+        if bd is None:
+            return
+        r = QMessageBox.question(self, "Rétablir l'original",
+                                 f"Annuler tes modifications de « {bd.name} » ?")
+        if r == QMessageBox.Yes:
+            self._remove(bid)
+            self.select(bid)
+
+    def _remove(self, bid):
+        try:
+            CFG.remove_user_block(bid)
+        except OSError as e:
+            QMessageBox.warning(self, "Bibliothèque", f"Impossible d'enregistrer {CFG.user_path} :\n{e}")
+            return
+        self.changed.emit()
+
+    def select(self, bid):
+        """Sélectionne (et montre) le bloc bid dans l'arbre."""
+        for i in range(self.tree.topLevelItemCount()):
+            cat = self.tree.topLevelItem(i)
+            for j in range(cat.childCount()):
+                ch = cat.child(j)
+                if ch.data(0, Qt.UserRole) == bid:
+                    cat.setExpanded(True)
+                    self.tree.setCurrentItem(ch)
+                    self.tree.scrollToItem(ch)
+                    return

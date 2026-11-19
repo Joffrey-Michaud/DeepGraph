@@ -10,7 +10,7 @@ from PyQt5.QtWidgets import (QAction, QActionGroup, QApplication, QColorDialog, 
                              QMenu, QMessageBox, QSpinBox, QStyle, QCheckBox)
 
 from .arrow import STYLES, ArrowItem
-from .items import BlockItem, NodeItem
+from .items import BlockItem, NodeItem, OperatorItem
 from .config import CFG
 from .export import copy_scene_image, export_scene
 from .layers import LayersPanel
@@ -91,7 +91,7 @@ class MainWindow(QMainWindow):
         self._make_actions()
         self._make_menus()
         self._make_toolbar()
-        self.view.context_actions = [self._bend_menu, self.a_edit, self._stack_entry, self.a_fit_text, None, self.a_copy, self.a_copy_img, self.a_dup, self.a_delete, None,
+        self.view.context_actions = [self._bend_menu, self.a_edit, self._stack_entry, self.a_fit_text, self._lib_entry, None, self.a_copy, self.a_copy_img, self.a_dup, self.a_delete, None,
                                      self.a_group, self.a_ungroup, self._order_menu, self._layer_menu, None, self.a_export_sel]
 
         self.zoom_label = QLabel("100 %")
@@ -100,7 +100,8 @@ class MainWindow(QMainWindow):
 
         self.library.activated.connect(self.add_at_center)
         self.library.reloadRequested.connect(lambda: self.reload_config(verbose=True))
-        self.library.editRequested.connect(self.open_config_file)
+        self.library.openFileRequested.connect(self.open_yaml)
+        self.library.changed.connect(lambda: self.reload_config(verbose=False))
         self.scene.modified.connect(self._on_modified)
         self.scene.modeChanged.connect(self._on_mode)
 
@@ -213,7 +214,7 @@ class MainWindow(QMainWindow):
                                 tip="Interface et fond sombres (les exports restent sur fond blanc)")
 
         self.a_reload = self._act("Recharger la configuration", lambda: self.reload_config(True), "F5")
-        self.a_cfg_edit = self._act("Ouvrir le fichier de configuration", self.open_config_file)
+        self.a_cfg_edit = self._act("Ouvrir blocks.yaml (avancé)", self.open_config_file)
         self.a_cfg_choose = self._act("Choisir un autre fichier de configuration…", self.choose_config)
         self.a_panel_props = self._act("Propriétés", lambda: self.show_right_panel("props"), checkable=True,
                                        tip="Panneau de droite : propriétés de la sélection")
@@ -241,6 +242,11 @@ class MainWindow(QMainWindow):
         self.a_help_update = self._act("Rechercher des mises à jour…", self.check_updates)
         self.a_stack = self._act("Empiler (stack)…", self.stack_dialog,
                                  tip="Ajoute derrière le bloc des copies sans texte (style « ×h »)")
+        self.a_new_block = self._act("Nouveau bloc de bibliothèque…", self.new_library_block,
+                                     tip="Créer un bloc dans la bibliothèque (nom, couleur, catégorie…)")
+        self.a_add_to_lib = self._act("Ajouter à la bibliothèque…", self.add_selection_to_library,
+                                      tip="Enregistrer ce bloc (couleur, taille, texte…) comme bloc de "
+                                          "bibliothèque réutilisable")
         self.a_reapply = self._act("Réappliquer les couleurs de la config aux blocs", self.scene.reapply_config)
 
     def _make_menus(self):
@@ -288,7 +294,7 @@ class MainWindow(QMainWindow):
                   self.a_panel_props, self.a_panel_order):
             m.addSeparator() if a is None else m.addAction(a)
         m = mb.addMenu("&Configuration")
-        for a in (self.a_reload, self.a_cfg_edit, self.a_cfg_choose, None, self.a_reapply):
+        for a in (self.a_new_block, None, self.a_reload, self.a_cfg_edit, self.a_cfg_choose, None, self.a_reapply):
             m.addSeparator() if a is None else m.addAction(a)
         m = mb.addMenu("Ai&de")
         m.addAction(self.a_help_guide)
@@ -851,8 +857,9 @@ class MainWindow(QMainWindow):
         files = self.watcher.files()
         if files:
             self.watcher.removePaths(files)
-        if os.path.exists(CFG.path):
-            self.watcher.addPath(CFG.path)
+        for p in (CFG.path, CFG.user_path):
+            if p and os.path.exists(p):
+                self.watcher.addPath(p)
 
     def _set_custom_colors(self):
         seen = []
@@ -879,7 +886,36 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"Configuration rechargée ({len(CFG.blocks)} blocs)", 3000)
 
     def open_config_file(self):
-        QDesktopServices.openUrl(QUrl.fromLocalFile(CFG.path))
+        self.open_yaml(CFG.path)
+
+    def open_yaml(self, path):
+        if not os.path.exists(path):              # mes_blocs.yaml pas encore créé
+            try:
+                CFG._write_user([])
+            except OSError as e:
+                QMessageBox.warning(self, "Configuration", str(e))
+                return
+            self._watch_config()
+        QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+
+    def new_library_block(self):
+        self.library.new_block()
+
+    def add_selection_to_library(self):
+        from .block_dialog import values_from_item
+        its = [i for i in self.scene.selectedItems() if isinstance(i, (BlockItem, OperatorItem))]
+        if len(its) != 1:
+            return
+        bid = self.library.new_block(values=values_from_item(its[0]))
+        if bid:
+            its[0].def_id = bid          # le bloc du schéma est désormais rattaché au nouveau modèle
+            self.statusBar().showMessage("Bloc ajouté à la bibliothèque", 4000)
+
+    def _lib_entry(self, menu):
+        its = self.scene.selectedItems()
+        if len(its) == 1 and isinstance(its[0], (BlockItem, OperatorItem)):
+            return self.a_add_to_lib
+        return None
 
     def choose_config(self):
         path, _ = QFileDialog.getOpenFileName(self, "Fichier de configuration", os.path.dirname(CFG.path),

@@ -8,6 +8,14 @@ from PyQt5.QtGui import QColor, QFont, QFontDatabase
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_CONFIG = os.path.join(ROOT, "blocks.yaml")
+# blocs ajoutés ou modifiés depuis l'interface : fichier à part, écrit par DeepGraph, ignoré par git
+# et jamais touché par les mises à jour
+USER_CONFIG = os.path.join(ROOT, "mes_blocs.yaml")
+USER_HEADER = """\
+# Blocs ajoutés ou modifiés depuis DeepGraph (bouton « Nouveau bloc… », clic droit > Modifier).
+# Ce fichier est réécrit par DeepGraph : le plus simple est de passer par l'interface.
+# Un bloc qui a le même « id » qu'un bloc de blocks.yaml le remplace.
+"""
 
 DEFAULT_STYLE = {
     "font": ["Helvetica", "TeX Gyre Heros", "Nimbus Sans", "Nimbus Sans L", "Arial", "Liberation Sans", "DejaVu Sans"],
@@ -51,11 +59,15 @@ class BlockDef:
     text_color: Optional[str] = None
     bold: bool = False
     stack: int = 0
+    origin: str = "base"         # base (blocks.yaml) | user (mes_blocs.yaml) | override (les deux)
 
 
 class Config:
     def __init__(self):
         self.path = DEFAULT_CONFIG
+        self.user_path = USER_CONFIG
+        self.base_blocks = {}
+        self.user_raw = []           # contenu brut de mes_blocs.yaml (pour le réécrire)
         self.style = dict(DEFAULT_STYLE)
         self.blocks = {}
         self.categories = []
@@ -90,49 +102,74 @@ class Config:
                     continue
                 style[k] = v
 
-        blocks, cats = {}, []
-        for i, raw in enumerate(data.get("blocks") or []):
-            where = f"blocks[{i}]"
-            if not isinstance(raw, dict) or "name" not in raw:
-                errors.append(f"{where} : chaque bloc doit être un dictionnaire avec au moins « name »")
-                continue
-            unknown = set(raw) - BLOCK_FIELDS
-            if unknown:
-                errors.append(f"{where} ({raw['name']}) : champ(s) inconnu(s) {sorted(unknown)}")
-            name = str(raw["name"])
-            bid = str(raw.get("id", name))
-            if bid in blocks:
-                errors.append(f"{where} : identifiant « {bid} » en double (ajoute un champ « id »)")
-                continue
-            color = str(raw.get("color", "#FFFFFF"))
-            if not QColor(color).isValid():
-                errors.append(f"{where} ({name}) : couleur invalide « {color} »")
-                color = "#FFFFFF"
-            shape = str(raw.get("shape", "rect"))
-            if shape not in ("rect", "circle"):
-                errors.append(f"{where} ({name}) : shape doit valoir 'rect' ou 'circle'")
-                shape = "rect"
+        blocks = {}
+        for bd in parse_blocks(data.get("blocks"), errors):
+            blocks[bd.id] = bd
+        self.base_blocks = dict(blocks)
+
+        # blocs de l'utilisateur
+        self.user_raw = []
+        if self.user_path and os.path.exists(self.user_path):
+            uname = os.path.basename(self.user_path)
             try:
-                bd = BlockDef(
-                    id=bid, name=name, label=str(raw.get("label", name)), color=color,
-                    description=str(raw.get("description", "") or "").strip(),
-                    category=str(raw.get("category", "Divers")), shape=shape,
-                    symbol=str(raw.get("symbol", "plus")),
-                    width=float(raw["width"]) if raw.get("width") else None,
-                    height=float(raw["height"]) if raw.get("height") else None,
-                    font_size=int(raw["font_size"]) if raw.get("font_size") else None,
-                    text_color=str(raw["text_color"]) if raw.get("text_color") else None,
-                    bold=bool(raw.get("bold", False)), stack=int(raw.get("stack", 0) or 0))
-            except (TypeError, ValueError) as e:
-                errors.append(f"{where} ({name}) : valeur invalide ({e})")
-                continue
-            blocks[bid] = bd
+                with open(self.user_path, encoding="utf-8") as f:
+                    udata = yaml.safe_load(f) or {}
+            except yaml.YAMLError as e:
+                errors.append(f"{uname} : erreur de syntaxe YAML : {e}")
+                udata = {}
+            except OSError as e:
+                errors.append(f"{uname} : {e}")
+                udata = {}
+            raws = udata.get("blocks") if isinstance(udata, dict) else None
+            self.user_raw = [r for r in (raws or []) if isinstance(r, dict)]
+            for bd in parse_blocks(raws, errors, uname):
+                bd.origin = "override" if bd.id in blocks else "user"
+                blocks[bd.id] = bd          # même id : remplace le bloc de blocks.yaml, à sa place
+        cats = []
+        for bd in blocks.values():
             if bd.category not in cats:
                 cats.append(bd.category)
 
         self.style, self.blocks, self.categories, self.errors = style, blocks, cats, errors
         self._family, self._fonts = None, {}
         return not errors
+
+    # ------------------------------------------------------- blocs utilisateur
+    def new_id(self, name):
+        """Identifiant libre pour un nouveau bloc : le nom, sinon « nom (2) »…"""
+        bid, k = name, 2
+        while bid in self.blocks or bid.startswith("__"):
+            bid, k = f"{name} ({k})", k + 1
+        return bid
+
+    def save_user_block(self, raw, old_id=None):
+        """Ajoute ou remplace (même id, ou old_id) un bloc dans mes_blocs.yaml."""
+        new = str(raw.get("id", raw["name"]))
+        key = old_id or new
+        out, done = [], False
+        for r in self.user_raw:
+            if str(r.get("id", r.get("name"))) in (key, new):
+                if not done:
+                    out.append(raw)
+                    done = True
+                continue
+            out.append(r)
+        if not done:
+            out.append(raw)
+        self._write_user(out)
+
+    def remove_user_block(self, bid):
+        """Retire le bloc de mes_blocs.yaml (bloc ajouté : supprimé ; bloc modifié : rétabli)."""
+        self._write_user([r for r in self.user_raw if str(r.get("id", r.get("name"))) != bid])
+
+    def _write_user(self, raws):
+        text = USER_HEADER + "\n" + yaml.dump({"blocks": raws}, Dumper=_Dumper, allow_unicode=True,
+                                               sort_keys=False, width=100, default_flow_style=False)
+        tmp = self.user_path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, self.user_path)
+        self.user_raw = list(raws)
 
     # ----------------------------------------------------------------- fonts
     @staticmethod
@@ -193,6 +230,63 @@ class Config:
             f.setHintingPreference(QFont.PreferNoHinting)
             self._fonts[key] = f
         return QFont(self._fonts[key])
+
+
+def parse_blocks(raws, errors, source=""):
+    """Liste YAML de blocs -> BlockDef valides (les problèmes vont dans errors)."""
+    out, seen = [], set()
+    pre = f"{source} : " if source else ""
+    for i, raw in enumerate(raws or []):
+        where = f"{pre}blocks[{i}]"
+        if not isinstance(raw, dict) or "name" not in raw:
+            errors.append(f"{where} : chaque bloc doit être un dictionnaire avec au moins « name »")
+            continue
+        unknown = set(raw) - BLOCK_FIELDS
+        if unknown:
+            errors.append(f"{where} ({raw['name']}) : champ(s) inconnu(s) {sorted(unknown)}")
+        name = str(raw["name"])
+        bid = str(raw.get("id", name))
+        if bid in seen:
+            errors.append(f"{where} : identifiant « {bid} » en double (ajoute un champ « id »)")
+            continue
+        color = str(raw.get("color", "#FFFFFF"))
+        if not QColor(color).isValid():
+            errors.append(f"{where} ({name}) : couleur invalide « {color} »")
+            color = "#FFFFFF"
+        shape = str(raw.get("shape", "rect"))
+        if shape not in ("rect", "circle"):
+            errors.append(f"{where} ({name}) : shape doit valoir 'rect' ou 'circle'")
+            shape = "rect"
+        try:
+            bd = BlockDef(
+                id=bid, name=name, label=str(raw.get("label", name)), color=color,
+                description=str(raw.get("description", "") or "").strip(),
+                category=str(raw.get("category", "Divers")), shape=shape,
+                symbol=str(raw.get("symbol", "plus")),
+                width=float(raw["width"]) if raw.get("width") else None,
+                height=float(raw["height"]) if raw.get("height") else None,
+                font_size=int(raw["font_size"]) if raw.get("font_size") else None,
+                text_color=str(raw["text_color"]) if raw.get("text_color") else None,
+                bold=bool(raw.get("bold", False)), stack=int(raw.get("stack", 0) or 0))
+        except (TypeError, ValueError) as e:
+            errors.append(f"{where} ({name}) : valeur invalide ({e})")
+            continue
+        seen.add(bid)
+        out.append(bd)
+    return out
+
+
+class _Dumper(yaml.SafeDumper):
+    pass
+
+
+def _str_repr(dumper, value):
+    # descriptions sur plusieurs lignes : bloc « | » lisible plutôt qu'une chaîne avec des \n
+    style = "|" if "\n" in value else None
+    return dumper.represent_scalar("tag:yaml.org,2002:str", value, style=style)
+
+
+_Dumper.add_representer(str, _str_repr)
 
 
 def description_html(text, title=None, summary_only=False):

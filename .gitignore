@@ -6,3 +6,5 @@ __pycache__/
 .DS_Store
 .deepgraph_install.json
 *.tmp-maj
+mes_blocs.yaml
+mes_blocs.yaml.tmp

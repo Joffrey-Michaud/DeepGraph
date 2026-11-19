@@ -75,7 +75,8 @@ démarrage tant qu'elle n'est pas installée) ; **Aide > Rechercher des mises à
   temps. `python main.py --update` installe directement.
 - **Installation** : dans un clone git, `main` avance jusqu'au tag de la release (seulement sur `main` sans
   modification locale, sinon rien n'est touché) ; dans une copie (.zip), l'archive de la release remplace les
-  fichiers, un `blocks.yaml` modifié est conservé (la nouvelle version est posée à côté, `blocks.yaml.nouveau`).
+  fichiers, un `blocks.yaml` modifié est conservé (la nouvelle version est posée à côté, `blocks.yaml.nouveau`) ;
+  `mes_blocs.yaml` (blocs créés depuis l'interface) n'est jamais touché.
 - **Accès** : le dépôt est privé. La vérification utilise un jeton (`DEEPGRAPH_TOKEN`, `GITHUB_TOKEN` ou
   `GH_TOKEN`), sinon GitHub CLI connecté (`gh auth login`), sinon `git` pour un clone. Sans aucun de ces moyens,
   un avertissement explique quoi installer.
@@ -99,17 +100,26 @@ Ce guide est aussi affiché par **Aide > Guide d'utilisation** (F1).
 
 ## Ajouter ses propres blocs
 
-Éditer [blocks.yaml](blocks.yaml) (le format est documenté en tête du fichier) :
+Bouton **« ＋ Nouveau bloc… »** sous la bibliothèque (ou menu Configuration > Nouveau bloc de
+bibliothèque) : une fenêtre demande le nom, le texte écrit dans le bloc, la catégorie (en choisir une
+ou en taper une nouvelle), la forme (rectangle ou cercle d'opération avec son symbole), la couleur, le
+texte (couleur, taille, gras), la taille, les copies empilées et une description, avec un aperçu en
+direct. Le bloc apparaît aussitôt dans la bibliothèque.
 
-```yaml
-  - name: Mon bloc
-    color: "#C6E6F5"
-    description: Ce que fait le bloc
-    category: Ma catégorie
-    height: 44
-```
+| Action | Comment |
+|---|---|
+| Modifier, dupliquer, supprimer un bloc | clic droit sur le bloc dans la bibliothèque |
+| Nouveau bloc dans une catégorie | clic droit sur la catégorie |
+| Réutiliser un bloc retouché sur le schéma | clic droit sur le bloc > **Ajouter à la bibliothèque…** (couleur, taille, texte repris) |
+| Annuler la modification d'un bloc fourni | clic droit > **Rétablir l'original** (un bloc fourni modifié s'affiche en italique) |
 
-Le fichier est relu automatiquement à chaque enregistrement.
+Ces blocs sont enregistrés dans `mes_blocs.yaml`, à côté de `blocks.yaml`. Ce fichier n'est pas suivi
+par git et les mises à jour n'y touchent jamais. Un bloc de `mes_blocs.yaml` qui a le même `id` qu'un
+bloc de `blocks.yaml` le remplace.
+
+Utilisateurs avancés : le bouton **⋯** ouvre `mes_blocs.yaml` ou `blocks.yaml` dans l'éditeur de texte
+(format documenté en tête de `blocks.yaml` ; style global : section `style` de `blocks.yaml`). Les
+fichiers sont relus à chaque enregistrement.
 
 ## Contribuer
 
