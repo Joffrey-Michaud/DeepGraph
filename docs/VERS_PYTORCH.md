@@ -29,20 +29,24 @@ aléatoires de forme plausible et affiche la forme de la sortie et le nombre de 
 | dans le schéma | dans le code |
 |---|---|
 | bloc de la bibliothèque (Conv2D, Batch Norm, ReLU, Linear, LSTM, Multi-Head Attention…) | la couche PyTorch correspondante |
-| texte du bloc : `Conv 7×7, 64, /2`, `FC 4096`, `Linear 256 → K`, `Dropout 0.1` | ses réglages (noyau 7, 64 canaux, pas 2…) |
+| texte du bloc : `Conv 7×7, 64, /2`, `Conv1d k7, s2, p3`, `FC 4096`, `Linear 256 → K`, `Dropout 0.1`, `GroupNorm (16)` | ses réglages (noyau, canaux, pas, padding, groupes…) |
+| `Linear C → 4C` | `nn.Linear(d, 4 * d)` : la lettre de gauche désigne la taille reçue |
+| attention : `Multi-Head Attention` + `256 canaux · 8 têtes` | `nn.MultiheadAttention(256, 8)` ; sur une image ou un signal (B, C, …), passage en séquence (B, positions, C) et retour |
 | texte composé : `BN + ReLU`, `2× (Conv 3×3 + ReLU)` + `64 canaux` | un `nn.Sequential` |
 | ligne de formes (import PyTorch) : `3×224×224 → 64×112×112` | canaux de sortie, padding exact |
 | flèche | le passage d'un tenseur ; une jonction = un tenseur réutilisé |
 | ⊕ / ⊗ / ⊙ / − / concaténation | `a + b`, `a * b`, `a - b`, `torch.cat(…)` |
 | flèche venant du vide, ou texte au départ d'une flèche (`x`, `Q`, `Inputs`) | argument du `forward`, nommé d'après le texte |
 | flèche vers le vide, ou texte à l'arrivée | valeur renvoyée |
+| texte court posé le long d'une flèche (`skip`, `Q`, `K, V`) | nom de la valeur qu'elle apporte : ordre des entrées d'une attention, argument du même nom d'un bloc détaillé (`forward(self, x, skip)`) |
 | cadre `N×` (ou `2× Nom`) | bloc répété : `nn.ModuleList` + boucle, ou `nn.Sequential` de N copies |
 | cadre nommé (`Bloc 1`, `couche cachée`) autour d'une chaîne | `nn.Sequential` du même nom |
-| cadre en pointillés titré (`Basic Block`), ou schéma à part avec un titre en gras | une classe, utilisée par les blocs qui portent ce titre (`Basic Block` + `128, /2` → `BasicBlock(64, 128, stride=2)`, 64 étant les canaux reçus) |
+| cadre en pointillés titré (`Basic Block`), ou schéma à part avec un titre en gras | une classe, utilisée par les blocs qui portent ce titre (`Basic Block` + `128, /2` → `BasicBlock(64, 128, stride=2)`, 64 étant les canaux reçus) ; si la définition n'écrit aucune taille et que les blocs disent `64 → 128`, ses convolutions sortent `C` canaux, fourni par chaque bloc |
 | flèches de couleur expliquées par une légende (flèche + texte : `Max Pool 2×2`, `Up-conv 2×2`, `copie + concaténation`) | l'opération sur chaque flèche de cette couleur (U-Net) |
 | cellules récurrentes dessinées dépliées dans le temps (LSTM → LSTM → LSTM) | un seul module, appelé à chaque pas, l'état passant de l'un à l'autre |
 | `Positional Encoding` ou `[class] token + Position Embedding` posé à côté d'un ⊕ | module d'encodage de position (sinusoïdal ou appris) |
-| bloc sans contenu connu (`Encodeur`, `Générateur G`) | une classe vide à compléter, qui laisse passer son entrée |
+| bloc sans contenu connu (`Encodeur`, `Générateur G`) | une classe vide à compléter, qui laisse passer son entrée ; si son texte dit `256 → 128`, une projection provisoire (Conv 1×1 ou Linear) aux bonnes tailles, pour que le reste s'exécute |
+| convolution transposée suivie d'une concaténation | appelée avec `output_size=` l'autre branche : la longueur suit le skip (2L ou 2L − 1) |
 | textes libres (dimensions, notes, référence) | recopiés en tête du fichier |
 
 Le titre en gras du schéma devient le nom de la classe : `ResNet-18` → `ResNet18`,
@@ -77,7 +81,10 @@ Le titre en gras du schéma devient le nom de la classe : `ResNet-18` → `ResNe
 
 - **Écrire les réglages dans le texte des blocs** : `Conv 3×3, 64, /2` plutôt que `Conv`.
 - **Écrire la taille de l'entrée** : `Image 224×224×3` donne `in_channels` et la taille exacte avant un
-  `Flatten` ; sans elle, l'essai suppose 3 canaux et 64×64 (marqué `TODO`).
+  `Flatten` ; sans elle, l'essai suppose 3 canaux et 64×64 (marqué `TODO`). Pour un signal 1D,
+  `1 × 1000` se lit canaux × longueur.
+- **Nommer les flèches qui comptent** : un texte court le long d'une flèche (`skip`, `Q`, `K, V`) dit
+  quelle entrée elle apporte ; sans lui, l'ordre vient de la position des flèches.
 - **Entrées d'une attention** (bas du bloc, de gauche à droite) : **V, K, Q**, comme dans la figure du
   Transformer. Ou étiqueter les entrées `Q`, `K`, `V` : les noms l'emportent sur la position.
 - **Détailler un bloc** : cadre en pointillés titré du nom du bloc, une flèche qui entre (étiquetée `x`)
@@ -85,6 +92,14 @@ Le titre en gras du schéma devient le nom de la classe : `ResNet-18` → `ResNe
   rempli par chaque bloc qui l'utilise (`Basic Block` / `128`).
 - **Plusieurs schémas dans un fichier** : chacun devient une classe, nommée par le titre en gras le
   plus proche.
+
+## Où sont les TODO
+
+- **Au bout de la ligne concernée** : réglage d'une couche (`# Conv 3×3 — TODO : préciser le nombre de
+  canaux…`), taille d'entrée du réseau (au bout de la première ligne qui utilise `in_channels`). Pour une
+  couche écrite sur plusieurs lignes (`nn.Sequential(…)`), sur la ligne de la parenthèse fermante.
+- **Dans le corps d'une classe vide** : bloc que le schéma ne détaille pas (`# TODO : couches de « … »`).
+- **Dans `__main__`** : les formes des entrées de l'essai.
 
 ## Blocs personnels
 
