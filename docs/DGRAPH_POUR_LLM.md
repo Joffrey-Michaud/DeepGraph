@@ -210,7 +210,11 @@ Options :
 
 Choisir le style :
 - éléments **alignés** (même `cx` ou même `cy`) → `straight` ;
-- décalés en x et en y → `ortho1` (`first: "v"` = d'abord vertical puis horizontal) ;
+- décalés en x et en y, en changeant de côté (bas → gauche, droite → haut) → `ortho1`
+  (`first: "v"` = d'abord vertical puis horizontal) ;
+- du haut d'un bloc vers le bas d'un autre (ou de côté à côté) **décalés** : jamais `ortho1`, dont le
+  dernier segment longerait le bord d'arrivée ; choisir le point d'entrée (`at`) juste au-dessus du
+  départ pour une flèche `straight`, ou `ortho2` avec `first: "v"` ;
 - **connexion qui doit passer à côté de blocs** (résiduelle, skip connection du U-Net, retour en
   arrière) : `"style": "auto"` — l'éditeur trouve le chemin orthogonal qui contourne les blocs,
   ex. `{"from": "j1", "to": {"node": "add1", "side": "right"}, "style": "auto"}` ;

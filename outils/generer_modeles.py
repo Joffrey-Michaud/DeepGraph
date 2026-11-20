@@ -423,6 +423,12 @@ def build_transformer(d):
     d.title("Transformer", "Vaswani et al., Attention is all you need, NeurIPS 2017", 0, 60)
 
 
+def _below(it, x):
+    """Point du bord bas de it à l'abscisse x : la flèche qui monte de x y entre tout droit."""
+    r = it.scene_frame()
+    return ((x - r.left()) / r.width(), 1)
+
+
 def build_attention(d):
     # ------------------------------------------- Scaled Dot-Product Attention
     X = -170
@@ -432,13 +438,13 @@ def build_attention(d):
     sc_ = d.lib("Scale", X - 10, -95)
     mk = d.lib("Mask (opt.)", X - 10, -140)
     sm = d.lib("softmax_attention", X - 10, -185)
-    mm2 = d.lib("MatMul", X + 20, -240)
+    mm2 = d.lib("MatMul", X + 25, -240, w=110)         # au-dessus de SoftMax et de V (fig. 2)
     d.ar(P(X - 30, -12), mm1, sb=(.25, 1))
     d.ar(P(X + 10, -12), mm1, sb=(.75, 1))
     d.chain([mm1, sc_, mk, sm], up=True)
-    d.ar(sm, mm2, T, (.25, 1), "ortho1", first="v")
-    d.ar(P(X + 60, -12), mm2, sb=(.75, 1), style="ortho1", first="v")
-    d.ar(mm2, P(X + 20, -285), T)
+    d.ar(sm, mm2, T, _below(mm2, X - 10))
+    d.ar(P(X + 60, -12), mm2, sb=_below(mm2, X + 60))
+    d.ar(mm2, P(X + 25, -285), T)
     d.txt("Scaled Dot-Product Attention", X + 10, -310, 14, bold=True)
     d.txt("Attention(Q, K, V) = softmax(QKᵀ / √d_k) V", X + 10, 40, 11, GREY, italic=True)
     # ----------------------------------------------------- Multi-Head Attention
@@ -448,9 +454,9 @@ def build_attention(d):
     lins = [d.lib("linear_proj", x, -55) for x in (X - 70, X, X + 70)]
     for x, li in zip((X - 70, X, X + 70), lins):
         d.ar(P(x, -12), li, sb=B)
-    sdpa = d.lib("Scaled Dot-Product Attention", X, -125, "Scaled Dot-Product\nAttention")
-    for li, f in zip(lins, (.2, .5, .8)):
-        d.ar(li, sdpa, T, (f, 1), "ortho1", first="v")
+    sdpa = d.lib("Scaled Dot-Product Attention", X, -125, "Scaled Dot-Product\nAttention", w=190)
+    for x, li in zip((X - 70, X, X + 70), lins):         # flèches droites, comme dans l'article
+        d.ar(li, sdpa, T, _below(sdpa, x))
     cat = d.lib("Concat", X, -190)
     lin = d.lib("Linear", X, -235, w=80)
     d.ar(sdpa, cat, T, B)
