@@ -203,7 +203,8 @@ class Tracer:
             return
         role = self._role(mod)
         if role == "leaf":
-            if isinstance(mod, TRANSPARENT_MODULES) or type(mod).__name__ in TRANSPARENT_NAMES:
+            if isinstance(mod, TRANSPARENT_MODULES) or type(mod).__name__ in TRANSPARENT_NAMES or \
+                    (type(mod).__name__ in REGULARIZERS and getattr(mod, "p", None) == 0):   # Dropout(0) : sans effet
                 self.frames.append(("transparent", self._inputs((args, kwargs))))
                 self.inside = 1
                 return
@@ -904,12 +905,21 @@ class Layout:
 
 
 # ===================================================================== export
+MAX_BLOCK_W = 200.0      # largeur commune des blocs : celle du plus long texte, au plus
+
+
 def measure_sizes(g, styled):
-    """Taille de chaque nœud telle que l'éditeur l'affichera (texte mesuré, blocs ajustés)."""
+    """Taille de chaque nœud telle que l'éditeur l'affichera (texte mesuré, blocs ajustés).
+
+    Tous les blocs d'un schéma ont la même largeur, celle qu'il faut pour écrire la plus longue ligne
+    sans retour (« 64×56×56 → 256×56×56 »), au plus MAX_BLOCK_W : colonnes alignées, figure moins haute."""
+    from PyQt5.QtGui import QFontMetricsF
+    from deepgraph import richtext
     from deepgraph.config import CFG
     from deepgraph.items import BlockItem
     st = CFG.style
-    sizes = {}
+    g10 = lambda v: -(-v // 10) * 10              # noqa: E731  arrondi à la dizaine supérieure
+    blocks, sizes, common = {}, {}, 0.0
     for nid, d in styled.items():
         lib = CFG.blocks.get(d.get("lib")) if d.get("lib") else None
         if lib is not None and lib.shape == "circle":
@@ -920,9 +930,16 @@ def measure_sizes(g, styled):
         h0 = float(lib.height or st["block_height"]) if lib else float(st["block_height"])
         b = BlockItem(d.get("text", ""))
         b.w, b.h = w0, h0
-        nw, nh = b.text_need()
-        g10 = lambda v: -(-v // 10) * 10              # noqa: E731  arrondi à la dizaine supérieure
-        sizes[nid] = (max(w0, g10(nw)), max(h0, g10(nh)))
+        text = d.get("text", "")
+        if text and not richtext.has_markup(text):
+            fm = QFontMetricsF(CFG.font(b.text_size(), b.bold, b.italic))
+            line = max(fm.horizontalAdvance(t) for t in text.split("\n")) + 2 * b.TEXT_PAD_X + 8
+            common = max(common, min(g10(line), MAX_BLOCK_W))
+        blocks[nid] = (b, w0, h0)
+    for nid, (b, w0, h0) in blocks.items():
+        w = max(w0, common)
+        nw, nh = b.text_need(w)
+        sizes[nid] = (max(w, g10(nw)), max(h0, g10(nh)))
     return sizes
 
 

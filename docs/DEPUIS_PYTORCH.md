@@ -73,13 +73,14 @@ python …/depuis_pytorch.py torchvision.models:vit_b_16 -e image:1,3,224,224 -p
 - **Un bloc** = un module appelé pendant l'exécution. Texte : nom de la classe (ou réglages pour les
   modules de `torch.nn` : « Conv2d k3 s2 », « Linear 128 → 64 », « Multi-Head Attention (8 têtes) »,
   « Embedding 1000 → 128 », « LSTM 128, 2 couches », « Dropout 0.3 »),
-  puis les formes **sans la première dimension** (le batch). Une petite suite de couches de `torch.nn`
+  puis les formes **sans la première dimension** (le batch). Tous les blocs ont la largeur de la plus
+  longue ligne (au plus 200 px), pour que les formes tiennent sur une ligne. Une petite suite de couches de `torch.nn`
   regroupées dans une classe (`Conv2dNormActivation`…) s'écrit « Conv2d k3 s2 + BatchNorm + ReLU6 ».
   Quand deux blocs auraient le même texte, leur nom d'attribut s'ajoute en première ligne
   (`mu` / `logvar`, `q_proj` / `k_proj`), sauf s'il est générique (`norm1`, `fc2`…).
 - **⊕ / concaténation / ⊗** : les `+`, `torch.cat`, `*` écrits dans un `forward` entre deux tenseurs.
   `view`, `transpose`, `reshape`, `x * 0.5`… sont transparents (pas de bloc), comme les modules
-  `Identity`, `Permute`, `Rearrange`…
+  `Identity`, `Permute`, `Rearrange`… et les `Dropout(0)`, sans effet.
 - **« Noise ε ~ 𝒩(0, I) »** : un tirage aléatoire (`torch.randn_like(mu)`, `torch.randn(…)`), dessiné comme
   une source à part (l'astuce de reparamétrisation d'un VAE donne `logvar ⊗ bruit`, puis `⊕ mu`).
 - **Petit bloc gris à côté** : un paramètre utilisé directement (`pos_embedding`, `class_token`…), avec
