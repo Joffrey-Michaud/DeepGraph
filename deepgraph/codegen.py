@@ -866,6 +866,7 @@ class Value:
     meta: tuple = (None, None)       # (genre, taille[, Spatial]) genre ∈ img1d img2d img3d seq vec tokens
     hint: str = ""                   # nom d'origine (q, k, v…) suivi le long des couches
     is_input: bool = False
+    labeled: bool = False            # hint lu sur la flèche elle-même (« skip »), pas hérité
 
 
 @dataclass(frozen=True)
@@ -1114,8 +1115,9 @@ class Generator:
         if proj:
             conv = {"img1d": "nn.Conv1d", "img2d": "nn.Conv2d", "img3d": "nn.Conv3d"}.get(proj)
             a, b = ("in_channels", "out_channels") if conv else ("in_features", "out_features")
-            layer = f"{conv}({a}, {b}, kernel_size=1)" if conv else f"nn.Linear({a}, {b})"
-            cc = ClassCode(cname, f"« {label} » : le schéma ne détaille pas ce bloc.", {a: None, b: None},
+            layer = f"{conv}({a}, {b}, kernel_size=1, stride=stride)" if conv else f"nn.Linear({a}, {b})"
+            params = {a: None, b: None, **({"stride": 1} if conv else {})}
+            cc = ClassCode(cname, f"« {label} » : le schéma ne détaille pas ce bloc.", params,
                            [f"self.proj = {layer}  # TODO : projection provisoire, à remplacer par les "
                             f"couches de « {label} »"], args,
                            [f"return self.proj({args[0]})  # TODO : calcul de « {label} »"])
@@ -1604,6 +1606,9 @@ class ClassBuilder:
         t = first_line(n.text)
         if not t:
             return True
+        sh = split_shapes(n.text)[1]
+        if sh and sh[0] != sh[1]:                    # « Down / 64×256×256 → 128×128×128 » : un calcul
+            return False
         return bool(re.search(r"[=∈~]|^\S{1,4}$|^[^\s(]{1,3}\(.*\)", t))
 
     def role(self, u):
@@ -1952,7 +1957,7 @@ class ClassBuilder:
             if v is None:
                 continue
             if e.label and edge_hint(e.label):
-                v = replace(v, hint=edge_hint(e.label))
+                v = replace(v, hint=edge_hint(e.label), labeled=True)
             ins.append((v, e))
         ins.sort(key=lambda ve: (ve[1].dp[0], ve[1].dp[1]))
         return ins
@@ -2683,10 +2688,14 @@ class ClassBuilder:
             cin = self.in_size(v0.meta[1], todos, kind)
             if a is not None and cin.isdigit() and int(cin) != a:
                 todos.append(f"le schéma indique {a} canaux d'entrée, le graphe en donne {cin}")
-            if cin != str(b):
+            sh = split_shapes(n.text)[1]                # « 64×256×256 → 128×128×128 » : pas de 2
+            st = sh[0][-1] // sh[1][-1] if sh and kind.startswith("img") and len(sh[0]) > 1 and len(sh[1]) > 1 \
+                and sh[1][-1] and sh[0][-1] % sh[1][-1] == 0 else 1
+            if cin != str(b) or st > 1:
                 cname = self.gen.stub_class(n.text, 1, proj=kind)
-                return self.emit_module(u, ins, f"{cname}({cin}, {b})", snake(cname),
-                                        (kind, str(b), hw_of(v0.meta)), todos=todos)
+                sp = Spatial(tuple(sh[1][1:])) if sh and len(sh[1]) > 1 and kind.startswith("img") else hw_of(v0.meta)
+                return self.emit_module(u, ins, f"{cname}({cin}, {b}" + (f", stride={st}" if st > 1 else "") + ")",
+                                        snake(cname), (kind, str(b), sp), todos=todos)
         cname = self.gen.stub_class(n.text, len(ins))
         return self.emit_module(u, ins, f"{cname}()", snake(cname), v0.meta, todos=todos)
 
@@ -2723,6 +2732,8 @@ class ClassBuilder:
                 else:
                     val = nums[i] if i < len(nums) else self.hp(p)
                     i += 1
+                    if self.kind == "def" and str(val) == str(getattr(self, "def_cout", None)):
+                        val = "C"
                 args.append(str(val))
                 mapping[p] = str(val)
             for p, d in cc.params.items():
@@ -2767,13 +2778,20 @@ class ClassBuilder:
         else:
             byname = {}                             # flèche nommée comme un argument (« skip »)
             for a in cc.forward_args:
-                m = next((v for v in vals if v.hint and v.hint.lower() == a
+                m = next((v for v in vals if v.labeled and v.hint.lower() == a
                           and all(v is not x for x in byname.values())), None)
                 if m is not None:
                     byname[a] = m
             if byname and len(cc.forward_args) == len(vals):
                 rest = [v for v in vals if all(v is not x for x in byname.values())]
                 vals = [byname.get(a) or rest.pop(0) for a in cc.forward_args]
+            elif len(vals) > 1:                     # « Up / 1024×16×16 → 512×32×32 » : x = la valeur 1024×16×16
+                sh = split_shapes(self.g.nodes[u].text)[1]
+                if sh:
+                    first = [v for v in vals if (hw_of(v.meta) and list(hw_of(v.meta).dims) == sh[0][1:]
+                                                 and len(sh[0]) > 1) or str(v.meta[1]) == str(sh[0][0])]
+                    if len(first) == 1:
+                        vals = first + [v for v in vals if v is not first[0]]
             call = [v.name for v in vals]
         metas = [v.meta for v in vals]
         todos = []
