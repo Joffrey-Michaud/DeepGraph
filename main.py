@@ -10,6 +10,7 @@ import os
 import sys
 
 from PyQt5.QtCore import QLibraryInfo, Qt, QTranslator
+from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import QApplication
 
 from deepgraph import __version__, updater
@@ -39,6 +40,11 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("DeepGraph")
     app.setApplicationVersion(__version__)
+    icon = QIcon()                       # icône de l'application (fenêtres, barre des tâches)
+    icon_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "deepgraph", "icon")
+    for size in (16, 32, 48, 64, 128, 256):
+        icon.addFile(os.path.join(icon_dir, f"logo_{size}.png"))
+    app.setWindowIcon(icon)
     app.setStyle("Fusion")
     tr = QTranslator(app)                # boutons standard de Qt en français (« Afficher les détails… »)
     if tr.load("qtbase_fr", QLibraryInfo.location(QLibraryInfo.TranslationsPath)):
