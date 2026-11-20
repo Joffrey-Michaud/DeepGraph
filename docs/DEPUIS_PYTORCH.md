@@ -32,7 +32,7 @@ Puis **Fichier > Ouvrir** `brouillon.dgraph` dans DeepGraph.
 | `-e nom:forme[:type]` | une entrée du `forward`, ex. `-e x:1,3,224,224`. Type : `float` (défaut), `long` / `int` (indices, ex. tokens : `-e tokens:1,32:long`), `bool` |
 | `--args '{…}'` | arguments du constructeur en JSON, ex. `--args '{"channels": [32, 64, 128], "dropout": 0.1}'` |
 | `-p N`, `--profondeur N` | niveau de détail (1 par défaut) : 1 = les sous-modules directs du modèle, 2 = un niveau de plus… |
-| `--detail Classe` | dessine **l'intérieur** de cette classe en **encart**, à droite de la vue d'ensemble (répétable) |
+| `--detail Classe` | dessine **l'intérieur** de cette classe en **encart**, à droite de la vue d'ensemble (répétable). L'exemple dessiné est un appel typique : la structure la plus fréquente (un Bottleneck sans `downsample`), de préférence un appel qui garde la forme (256 → 256) |
 | `--deplier Classe` | montre l'intérieur de cette classe directement dans la vue d'ensemble |
 | `--replier Classe` | garde cette classe en un seul bloc, même avec une grande profondeur |
 | `--formes entree-sortie` | dans chaque bloc, forme d'entrée → forme de sortie (défaut) |
@@ -71,7 +71,8 @@ python …/depuis_pytorch.py torchvision.models:vit_b_16 -e image:1,3,224,224 -p
 ## Lire le résultat
 
 - **Un bloc** = un module appelé pendant l'exécution. Texte : nom de la classe (ou réglages pour les
-  modules de `torch.nn` : « Conv2d k3 s2 », « Linear 128 → 64 », « Multi-Head Attention (8 têtes) »),
+  modules de `torch.nn` : « Conv2d k3 s2 », « Linear 128 → 64 », « Multi-Head Attention (8 têtes) »,
+  « Embedding 1000 → 128 », « LSTM 128, 2 couches », « Dropout 0.3 »),
   puis les formes **sans la première dimension** (le batch). Une petite suite de couches de `torch.nn`
   regroupées dans une classe (`Conv2dNormActivation`…) s'écrit « Conv2d k3 s2 + BatchNorm + ReLU6 ».
   Quand deux blocs auraient le même texte, leur nom d'attribut s'ajoute en première ligne
@@ -81,7 +82,12 @@ python …/depuis_pytorch.py torchvision.models:vit_b_16 -e image:1,3,224,224 -p
   `Identity`, `Permute`, `Rearrange`…
 - **« Noise ε ~ 𝒩(0, I) »** : un tirage aléatoire (`torch.randn_like(mu)`, `torch.randn(…)`), dessiné comme
   une source à part (l'astuce de reparamétrisation d'un VAE donne `logvar ⊗ bruit`, puis `⊕ mu`).
-- **Petit bloc gris à côté** : un paramètre utilisé directement (`pos_embedding`, `class_token`…).
+- **Petit bloc gris à côté** : un paramètre utilisé directement (`pos_embedding`, `class_token`…), avec
+  sa forme (`1×1×768`).
+- **« Global Avg Pooling »** : aussi pour une moyenne écrite dans un `forward` sur toutes les dimensions
+  d'espace (`x.mean((2, 3))`, bloc SE).
+- **« Sélection [:, 0] »** : une indexation qui retire une dimension (`x[:, 0]` du jeton de classe,
+  `out[:, -1]` du dernier pas d'un RNN).
 - **Cadre plein** (titre en haut à gauche) : une liste de modules nommée (`self.encoder = nn.ModuleList(…)`,
   `nn.Sequential`) — son nom d'attribut sert de titre (pas de titre si c'est un numéro : `features.3`).
 - **Cadre pointillé** : un module dont on montre l'intérieur ; « 6× Block » s'il est répété.

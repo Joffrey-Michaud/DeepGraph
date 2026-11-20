@@ -260,6 +260,14 @@ class Tracer:
         if not ins:
             return
         cat = OP_OF.get(name)
+        special = spatial_reduce(name, args, kwargs, outs[0]) or select_label(name, args, outs[0])
+        if special:                              # x.mean((2, 3)), x[:, 0] : visibles dans le schéma
+            k = sum(1 for n in self.nodes.values() if n.kind == "op") + 1
+            node = self._new(f"op{k}:{name.strip('_')}", "op", op=special[0], label=special[1])
+            self._link(ins[:1], node)
+            node.out_shape = tuple(outs[0].shape)
+            self._bind(out, node.id)
+            return
         if cat in ("add", "sub", "mul", "cat", "matmul") and len(ins) >= 2 \
                 or cat in ("act", "norm", "resize", "attn") \
                 or (cat is None and len(ins) >= 2 and not name.startswith("__")):
@@ -507,6 +515,14 @@ def builtin_label(m):
               "TransformerDecoderLayer": ("Transformer Decoder Layer", "Decoder")}
     if c == "GroupNorm":
         return f"GroupNorm ({m.num_groups})", "Group Norm"
+    if c.startswith("Dropout") and getattr(m, "p", 0.5) != 0.5:
+        return f"Dropout {m.p:g}", "Dropout"
+    if c == "Embedding":
+        return f"Embedding {m.num_embeddings} → {m.embedding_dim}", "Embedding"
+    if c in ("LSTM", "GRU", "RNN"):
+        name = ("Bi" if m.bidirectional else "") + c
+        lib = "BiLSTM" if m.bidirectional and c == "LSTM" else c
+        return f"{name} {m.hidden_size}" + (f", {m.num_layers} couches" if m.num_layers > 1 else ""), lib
     if c in simple:
         return simple[c]
     return c, None
@@ -528,7 +544,45 @@ COLOR_HINTS = [  # (mots dans le nom de la classe, bloc de bibliothèque dont on
     (("lstm", "gru", "rnn", "recurrent"), "LSTM"),
     (("generator",), "Generator"), (("discriminator",), "Discriminator"),
 ]
-RESIZE_TEXT = {"max_pool1d": ("Max Pooling", "Max Pooling"), "max_pool2d": ("Max Pooling", "Max Pooling"),
+
+
+def spatial_reduce(name, args, kwargs, out):
+    """x.mean((2, 3)) / x.amax(…) sur toutes les dimensions d'espace -> ("resize", "global_avg_pool")."""
+    if name not in ("mean", "amax") or not args or not isinstance(args[0], torch.Tensor) or args[0].dim() < 3:
+        return None
+    dims = kwargs.get("dim", args[1] if len(args) > 1 else None)
+    if dims is None:
+        return None
+    dims = {d % args[0].dim() for d in ((dims,) if isinstance(dims, int) else dims)}
+    if dims != set(range(2, args[0].dim())):
+        return None
+    return "resize", "global_avg_pool" if name == "mean" else "global_max_pool"
+
+
+def select_label(name, args, out):
+    """x[:, 0], out[:, -1] (une dimension disparaît) -> ("select", "[:, 0]") ; sinon None."""
+    if name != "__getitem__" or len(args) < 2 or not isinstance(args[0], torch.Tensor) \
+            or not isinstance(out, torch.Tensor) or out.dim() >= args[0].dim():
+        return None
+    idx = args[1] if isinstance(args[1], tuple) else (args[1],)
+    if not idx or isinstance(idx[0], int) or not any(isinstance(i, int) for i in idx):
+        return None                              # x[0] : élément d'un lot, pas une couche
+    parts = []
+    for i in idx:
+        if isinstance(i, slice) and i == slice(None):
+            parts.append(":")
+        elif isinstance(i, int):
+            parts.append(str(i))
+        elif i is Ellipsis:
+            parts.append("...")
+        else:
+            return None
+    return "select", "[" + ", ".join(parts) + "]"
+
+
+RESIZE_TEXT = {"global_avg_pool": ("Global Avg Pooling", "Avg Pooling"),
+               "global_max_pool": ("Global Max Pooling", "Max Pooling"),
+               "max_pool1d": ("Max Pooling", "Max Pooling"), "max_pool2d": ("Max Pooling", "Max Pooling"),
                "avg_pool1d": ("Avg Pooling", "Avg Pooling"), "avg_pool2d": ("Avg Pooling", "Avg Pooling"),
                "adaptive_avg_pool1d": ("Avg Pooling", "Avg Pooling"),
                "adaptive_avg_pool2d": ("Avg Pooling", "Avg Pooling"),
@@ -592,6 +646,9 @@ def style_node(n, blocks, shapes):
             txt = blocks[lib].label if lib in blocks else n.label
         elif n.op == "norm":
             txt, lib = n.label.replace("_", " ").title().replace(" ", ""), "Layer Norm"
+        elif n.op == "select":
+            txt, lib = "Sélection " + n.label, None
+            d["color"] = "#F3F3F3"
         elif n.op == "resize":
             txt, lib = RESIZE_TEXT.get(n.label, (txt, "Upsample"))
             if n.label.startswith("adaptive") and n.out_shape and all(v == 1 for v in n.out_shape[2:]):
@@ -621,7 +678,9 @@ def style_node(n, blocks, shapes):
     sl = shape_line(n, shapes) if n.kind not in ("op",) or n.op not in OP_LIB else ""
     if n.kind == "module" and n.cls == "Linear":
         sl = ""                                  # « Linear 512 → 1000 » dit déjà tout
-    if sl and n.kind not in ("param", "noise"):
+    if n.kind == "param" and n.out_shape and shapes != "aucune":
+        lines.append("×".join(map(str, n.out_shape)))      # forme du paramètre (« 1×1×768 ») : reprise par le code
+    elif sl and n.kind not in ("param", "noise"):
         lines.append(sl)
     d["text"] = "\n".join(lines)
     return d
@@ -1063,24 +1122,56 @@ def build(g, title, shapes):
 
 # ===================================================================== encarts
 def capture_calls(model, inputs, classes):
-    """Premier appel de chaque classe demandée : (module, args, kwargs) avec les vraies entrées."""
-    found, handles = {}, []
+    """Appel représentatif de chaque classe demandée : (module, args, kwargs) avec les vraies entrées.
+
+    Parmi les appels : la structure la plus fréquente (un Bottleneck sans « downsample », un
+    InvertedResidual avec expansion), et de préférence un appel qui garde la forme (256 → 256 plutôt
+    que 64 → 256), dont les tailles internes se lisent alors par rapport à la sortie (C // 4, 4 * C)."""
+    calls, handles = {}, []
+
+    def snap(v):          # copie des listes : DenseNet ajoute ensuite ses sorties à la liste reçue
+        if isinstance(v, (list, tuple)):
+            return type(v)(snap(x) for x in v)
+        if isinstance(v, dict):
+            return {k: snap(x) for k, x in v.items()}
+        return v
+
+    def kinds(m):
+        return type(m).__name__ + "(" + ",".join(kinds(c) for c in m.children()) + ")"
 
     def make(cls):
-        def hook(mod, args, kwargs):
-            if cls not in found:
-                found[cls] = (mod, args, kwargs)
-        return hook
+        def pre(mod, args, kwargs):
+            calls.setdefault(cls, []).append([mod, snap(args), snap(kwargs), None])
+
+        def post(mod, args, kwargs, out):
+            for c in reversed(calls.get(cls, [])):
+                if c[0] is mod and c[3] is None:
+                    c[3] = tuple(out.shape) if isinstance(out, torch.Tensor) else ()
+                    break
+        return pre, post
     for m in model.modules():
         c = type(m).__name__
         if c in classes:
-            handles.append(m.register_forward_pre_hook(make(c), with_kwargs=True))
+            pre, post = make(c)
+            handles.append(m.register_forward_pre_hook(pre, with_kwargs=True))
+            handles.append(m.register_forward_hook(post, with_kwargs=True))
     try:
         with torch.no_grad():
             model(*[t for _, t in inputs])
     finally:
         for h in handles:
             h.remove()
+    found = {}
+    for cls, lst in calls.items():
+        freq = {}
+        for c in lst:
+            freq[kinds(c[0])] = freq.get(kinds(c[0]), 0) + 1
+
+        def keeps_shape(c):
+            t = next(_tensors((c[1], c[2])), None)
+            return t is not None and tuple(t.shape) == c[3]
+        best = max(range(len(lst)), key=lambda i: (freq[kinds(lst[i][0])], keeps_shape(lst[i]), -i))
+        found[cls] = tuple(lst[best][:3])
     return found
 
 
@@ -1091,7 +1182,12 @@ def detail_graph(mod, args, kwargs, depth, fold=True):
         named = list(bound.arguments.items())
     except (TypeError, ValueError):
         named = [(f"x{i}", a) for i, a in enumerate(args)] + list(kwargs.items())
-    inputs = [(name, v) for name, v in named if isinstance(v, torch.Tensor)]
+    inputs = []
+    for name, v in named:
+        if isinstance(v, torch.Tensor):
+            inputs.append((name, v))
+        elif isinstance(v, (list, tuple)):          # liste de tenseurs (DenseNet : sorties précédentes)
+            inputs += [(f"{name}{i}", t) for i, t in enumerate(v) if isinstance(t, torch.Tensor)]
     g = Tracer(mod, depth).run(inputs, call=(args, kwargs))
     if fold:
         g.fold_open_repeats()
@@ -1204,7 +1300,12 @@ def main(argv=None):
                 print(f"[détail] classe « {c} » jamais appelée : ignorée", file=sys.stderr)
                 continue
             mod, args_, kwargs_ = calls[c]
-            sub = detail_graph(mod, args_, kwargs_, 1, not a.sans_repetitions)
+            try:
+                sub = detail_graph(mod, args_, kwargs_, 1, not a.sans_repetitions)
+            except Exception as e:  # noqa: BLE001
+                print(f"[détail] classe « {c} » : échec du traçage ({type(e).__name__} : {e}), encart ignoré",
+                      file=sys.stderr)
+                continue
             inset, ib = build(sub, c, a.formes)
             dx, dy = x_cur - ib[0], bbox[1] - ib[1]
             merge_inset(doc, inset, dx, dy, f"{c}/")

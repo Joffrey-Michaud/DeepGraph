@@ -32,7 +32,16 @@ aléatoires de forme plausible et affiche la forme de la sortie et le nombre de 
 | texte du bloc : `Conv 7×7, 64, /2`, `Conv1d k7, s2, p3`, `FC 4096`, `Linear 256 → K`, `Dropout 0.1`, `GroupNorm (16)` | ses réglages (noyau, canaux, pas, padding, groupes…) |
 | `Linear C → 4C` | `nn.Linear(d, 4 * d)` : la lettre de gauche désigne la taille reçue |
 | attention : `Multi-Head Attention` + `256 canaux · 8 têtes` | `nn.MultiheadAttention(256, 8)` ; sur une image ou un signal (B, C, …), passage en séquence (B, positions, C) et retour |
-| texte composé : `BN + ReLU`, `2× (Conv 3×3 + ReLU)` + `64 canaux` | un `nn.Sequential` |
+| texte composé : `BN + ReLU`, `2× (Conv 3×3 + ReLU)` + `64 canaux`, ou couches sur deux lignes (`Conv1d k7, 32` / `BN + ReLU`) | un `nn.Sequential` |
+| taille symbolique divisée : `FC C/16` | `nn.Linear(C, C // 16)` |
+| `LSTM 128, 2 couches`, `BiGRU 64`, `Embedding 1000 → 128`, `Dropout 0.3` | taille de l'état, `num_layers`, `bidirectional`, vocabulaire, probabilité |
+| nom en première ligne d'un bloc : `mu` / `Linear 400 → 20` | `self.mu = nn.Linear(400, 20)`, `mu = self.mu(x)` |
+| note générale : `ReLU après chaque convolution et FC`, `activations : tanh`, `Conv : pas 1, padding 1, ReLU`, `FC 4096 : ReLU + Dropout`, `chaque convolution est suivie de BN + ReLU` | la couche ajoutée après chaque couche visée (après sa BatchNorm si elle en a une, avant une LRN), sauf si le schéma la dessine déjà et sauf après la dernière couche ; les réglages complètent les couches qui ne les précisent pas |
+| taille écrite à côté d'un bloc : `55×55×96`, `C1 : 6@28×28`, `224×224` | forme de sa sortie : padding exact des convolutions et poolings ; à côté de l'entrée (`1@32×32`) : ses canaux et sa taille. Les convolutions sans taille suivent l'habitude du schéma (padding 0 si les autres n'en ont pas) |
+| `Sélection [:, 0]`, `[:, -1]` | indexation `x[:, 0]` (dernier pas d'un RNN, jeton de classe) |
+| bloc `Noise` (`ε ~ N(0, I)`) qui alimente un ⊗ ou un ⊕ | `eps = torch.randn_like(…)`, tiré dans le forward |
+| vecteur (B, C) combiné à une image par ⊗ ou ⊕ (SE, CBAM, embedding de temps) | `w[:, :, None, None] * x` |
+| paramètre appris posé à côté d'un opérateur (`class_token` / `1×1×768`, `layer_scale` / `96×1×1`) | `nn.Parameter` de cette forme |
 | ligne de formes (import PyTorch) : `3×224×224 → 64×112×112` | canaux de sortie, padding exact |
 | flèche | le passage d'un tenseur ; une jonction = un tenseur réutilisé |
 | ⊕ / ⊗ / ⊙ / − / concaténation | `a + b`, `a * b`, `a - b`, `torch.cat(…)` |
@@ -44,7 +53,8 @@ aléatoires de forme plausible et affiche la forme de la sortie et le nombre de 
 | cadre en pointillés titré (`Basic Block`), ou schéma à part avec un titre en gras | une classe, utilisée par les blocs qui portent ce titre (`Basic Block` + `128, /2` → `BasicBlock(64, 128, stride=2)`, 64 étant les canaux reçus) ; si la définition n'écrit aucune taille et que les blocs disent `64 → 128`, ses convolutions sortent `C` canaux, fourni par chaque bloc |
 | flèches de couleur expliquées par une légende (flèche + texte : `Max Pool 2×2`, `Up-conv 2×2`, `copie + concaténation`) | l'opération sur chaque flèche de cette couleur (U-Net) |
 | cellules récurrentes dessinées dépliées dans le temps (LSTM → LSTM → LSTM) | un seul module, appelé à chaque pas, l'état passant de l'un à l'autre |
-| `Positional Encoding` ou `[class] token + Position Embedding` posé à côté d'un ⊕ | module d'encodage de position (sinusoïdal ou appris) |
+| `Positional Encoding` ou `[class] token + Position Embedding` posé à côté d'un ⊕ | module d'encodage de position (sinusoïdal ou appris) ; une `MLP Head` qui suit lit le jeton de classe (`x[:, 0]`) |
+| échantillonnage `z = μ + σ ⊙ ε` | le forward renvoie aussi μ et log σ², nécessaires à la perte KL |
 | bloc sans contenu connu (`Encodeur`, `Générateur G`) | une classe vide à compléter, qui laisse passer son entrée ; si son texte dit `256 → 128`, une projection provisoire (Conv 1×1 ou Linear) aux bonnes tailles, pour que le reste s'exécute |
 | convolution transposée suivie d'une concaténation | appelée avec `output_size=` l'autre branche : la longueur suit le skip (2L ou 2L − 1) |
 | textes libres (dimensions, notes, référence) | recopiés en tête du fichier |
@@ -71,7 +81,15 @@ Le titre en gras du schéma devient le nom de la classe : `ResNet-18` → `ResNe
 - Une taille impossible à déduire reçoit 64 et un `TODO`.
 - Convolution : padding « same » (`k // 2`, ou calculé à partir des formes si elles sont écrites).
   Pooling sans pas indiqué : pas 2 pour un noyau 2×2, sinon pas 1.
-- Une `Linear` après des convolutions reçoit un `nn.Flatten()`.
+- Une `Linear` après des convolutions reçoit un `nn.Flatten()`, sauf si sa taille d'entrée est celle des
+  canaux (`Linear 96 → 384` sur une image 96×56×56) : elle agit alors en chaque position et s'écrit
+  `nn.Conv2d(96, 384, kernel_size=1)` (même calcul). Une `LayerNorm` sur une image normalise ses canaux
+  (`ChannelLayerNorm`, comme ConvNeXt). Un RNN ou une attention après des convolutions reçoit la
+  séquence des positions (`x.transpose(1, 2)`).
+- Un bloc détaillé qui réduit la taille (`/2`) reçoit `stride` sur chaque branche : la première
+  convolution de noyau > 1 du chemin principal, la Conv 1×1 d'un raccourci dessiné.
+- Une définition dessinée pour un exemple qui garde la forme (`256×14×14` en entrée et en sortie)
+  exprime ses tailles internes par rapport à C : `C // 4` (Bottleneck), `4 * C` (MLP de ConvNeXt).
 - Dernière couche sans taille : `num_classes` (ou `vocab_size` s'il y a des embeddings).
 - Réglages globaux (`d_model`, `num_heads`, `d_ff`, `vocab_size`, `hidden_size`, `N`…) : arguments du
   constructeur, avec une valeur par défaut à vérifier.
@@ -83,6 +101,10 @@ Le titre en gras du schéma devient le nom de la classe : `ResNet-18` → `ResNe
 - **Écrire la taille de l'entrée** : `Image 224×224×3` donne `in_channels` et la taille exacte avant un
   `Flatten` ; sans elle, l'essai suppose 3 canaux et 64×64 (marqué `TODO`). Pour un signal 1D,
   `1 × 1000` se lit canaux × longueur.
+- **Écrire les tailles intermédiaires** à droite des blocs (`55×55×96`, `C1 : 6@28×28`) : le padding des
+  convolutions en est déduit (LeNet-5, AlexNet).
+- **Une note pour ce qui se répète** : `ReLU après chaque convolution et FC` plutôt qu'un bloc ReLU
+  après chaque couche.
 - **Nommer les flèches qui comptent** : un texte court le long d'une flèche (`skip`, `Q`, `K, V`) dit
   quelle entrée elle apporte ; sans lui, l'ordre vient de la position des flèches.
 - **Entrées d'une attention** (bas du bloc, de gauche à droite) : **V, K, Q**, comme dans la figure du
@@ -113,14 +135,29 @@ compléter.
 ## Aller-retour avec l'import PyTorch
 
 Un schéma produit par `outils/depuis_pytorch.py` se retraduit en code, ce qui permet de vérifier les
-deux outils l'un par l'autre. Par exemple, `torchvision.models:resnet18 --detail BasicBlock` puis
-`vers_pytorch.py --essai` redonne un ResNet-18 de 11,69 M paramètres (torchvision : 11,69 M, l'écart
-étant les biais des convolutions, que le schéma n'indique pas).
+deux outils l'un par l'autre. Les blocs répétés détaillés en encart (`--detail`) donnent les classes ;
+le nombre de paramètres du code obtenu, comparé au modèle d'origine :
+
+| modèle | options de l'import | paramètres du code / d'origine |
+|---|---|---|
+| ResNet-18, ResNet-50 | `--detail BasicBlock`, `--detail Bottleneck` | 11,69 M / 11,69 M ; 25,58 M / 25,56 M |
+| ConvNeXt-T | `--detail CNBlock` | 28,59 M / 28,59 M |
+| EfficientNet-B0 | `--detail MBConv` | 5,32 M / 5,29 M |
+| DenseNet-121 | `--deplier _DenseBlock --detail _DenseLayer` | 7,99 M / 7,98 M |
+| ViT-B/16 | `--deplier Encoder --detail EncoderBlock` | 86,57 M / 86,57 M |
+| MobileNetV2 | `--detail InvertedResidual` | 4,25 M / 3,50 M (raccourci Conv 1×1 ajouté là où MobileNet n'en met pas) |
+| U-Net, GPT, VAE, SE-Net, LSTM (petits modèles d'essai) | `--detail` des blocs répétés | identiques |
+
+Les petits écarts viennent des biais des convolutions, que le schéma n'indique pas.
 
 ## Limites connues
 
 - Le schéma montre une architecture, pas tout le calcul : remises en forme (`view`, `permute`),
-  masques, choix du jeton de classe, initialisation… restent à écrire.
+  masques, initialisation… restent à écrire.
+- Un schéma qui décrit un entraînement plutôt qu'un calcul (GAN : D appliqué tour à tour à G(z) et à x)
+  donne un forward qui combine les deux entrées : à réécrire.
+- Une définition dessinée pour un exemple ne connaît pas les variantes : un bloc résiduel dont la forme
+  change reçoit un raccourci Conv 1×1 (ResNet), même si le modèle d'origine n'en a pas (MobileNet).
 - Un bloc dont le texte n'est pas une couche connue (`Encodeur`, `Fusion`) devient une classe vide.
 - Les copies empilées (`×h` des têtes d'attention) sont signalées en commentaire, pas découpées en têtes.
 - Une flèche dessinée pour l'explication (« réinjectée en entrée ») est prise pour un vrai passage de

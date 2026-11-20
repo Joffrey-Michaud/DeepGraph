@@ -99,8 +99,11 @@ sans LLM. `--detail Classe` ajoute l'intérieur d'une classe en encart. Document
 **Fichier > Exporter en code PyTorch…** (ou `python outils/vers_pytorch.py schema.dgraph --essai`) écrit
 un `.py` avec une classe `nn.Module` par réseau : couches lues dans les blocs et leur texte
 (« Conv 7×7, 64, /2 », « BN + ReLU »), flèches, ⊕ / concaténations, cadres « N× » et cadres en
-pointillés (classes). Les couches sont classiques (`nn.Conv2d(64, 128, …)`) : leur taille d'entrée est
-suivie de couche en couche ; ce que le schéma ne dit pas, ou ne permet pas de déduire, est marqué `TODO`. Les 13 modèles types donnent un code qui s'exécute. Documentation :
+pointillés (classes), notes générales (« ReLU après chaque convolution ») et tailles écrites à côté des
+blocs (« 55×55×96 », d'où le padding). Les couches sont classiques (`nn.Conv2d(64, 128, …)`) : leur taille
+d'entrée est suivie de couche en couche ; ce que le schéma ne dit pas, ou ne permet pas de déduire, est
+marqué `TODO`. Les 13 modèles types donnent un code qui s'exécute (LeNet-5, AlexNet, VGG-16, ResNet-18 :
+le nombre de paramètres de l'article). Documentation :
 **Aide > Code PyTorch depuis un schéma…** ou [docs/VERS_PYTORCH.md](docs/VERS_PYTORCH.md).
 
 ## Générer un schéma avec un LLM

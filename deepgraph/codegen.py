@@ -145,6 +145,28 @@ def repeat_label(label):
     return m.group(1), (m.group(2) or "").strip()
 
 
+def block_name(text):
+    """Nom écrit en première ligne d'un bloc dont la suite décrit la couche : « mu\\nLinear 400 → 20 » -> mu."""
+    lines = [x for x in (text or "").strip().split("\n") if x.strip()]
+    if len(lines) < 2:
+        return ""
+    head = plain(lines[0]).strip()
+    if not re.fullmatch(r"[a-z_][\w.]{0,23}", head) or parse_part(head) is not None:     # mu, logvar, fc1
+        return ""
+    if parse_text("\n".join(lines[1:])) is None:
+        return ""
+    return ident(head, "")
+
+
+def ref_text(text):
+    """Texte d'un bloc sans le nom d'attribut posé en première ligne par l'import (« denselayer1\\n_DenseLayer »)."""
+    lines = (text or "").strip().split("\n")
+    if len(lines) > 1 and re.fullmatch(r"[a-z_][\w.]{0,23}", plain(lines[0]).strip()) and \
+            re.search(r"[A-Z_]", lines[1].strip()[:1] or "a"):
+        return "\n".join(lines[1:])
+    return text or ""
+
+
 def label_line(text):
     """Texte d'un bloc sur une ligne : « Multi-Head\nAttention » -> « Multi-Head Attention »,
     « Conv 3×3\n64 canaux » -> « Conv 3×3 / 64 canaux » (ligne de réglages)."""
@@ -247,6 +269,10 @@ def _numbers(s):
         if _size(m.group(1)) is not None:
             out["in"] = _size(m.group(1))
         s = s[:m.start()] + " " + s[m.end():]
+    m = re.search(r"(?<![\w])([A-Za-z](?:_\w+)?)\s*/\s*(\d+)\b", s)          # « C/16 » : taille, pas un pas
+    if m and "out" not in out and m.group(1).lower() not in ("x", "k", "s", "p"):
+        out["out"] = f"{m.group(1)} // {m.group(2)}"
+        s = s[:m.start()] + " " + s[m.end():]
     m = KERNEL.search(s)
     if m:
         out["k"] = int(m.group(1))
@@ -280,6 +306,9 @@ def parse_part(part):
     low = s.lower()
     if not low:
         return None
+    m = re.search(r"\[[\s:,.\-\d]*\d[\s:,.\-\d]*\]", s)
+    if m and re.match(r"^(s[ée]lection|select\w*|index\w*|indexation|x)?\s*\[", low):
+        return Spec("select", {"idx": re.sub(r"\s+", "", m.group(0)).replace(",", ", ")})
     if re.search(r"attention", low):
         p = {"masked": "mask" in low, "self": "self" in low}
         m = re.search(r"(\d+)\s*(?:t[êe]tes?|heads?)\b", low)
@@ -294,9 +323,15 @@ def parse_part(part):
         return Spec("patch")
     if re.search(r"position", low):
         return Spec("posenc", {"learned": "embedding" in low or "appris" in low, "cls": "token" in low})
-    if re.search(r"\b(bi\s*-?\s*lstm|lstm|gru|rnn)\b", low):
-        cell = "GRU" if "gru" in low else "LSTM" if "lstm" in low else "RNN"
-        return Spec("rnn", {"cell": cell, "bi": bool(re.search(r"\bbi", low)), **_numbers(s)})
+    m = re.search(r"\b(bi\s*-?\s*)?(lstm|gru|rnn)\b", low)
+    if m:
+        cell = {"gru": "GRU", "lstm": "LSTM", "rnn": "RNN"}[m.group(2)]
+        p = {"cell": cell, "bi": bool(m.group(1)) or "bidirection" in low}
+        m = re.search(r"(\d+)\s*(?:couches|layers|niveaux)\b", low)
+        if m:
+            p["layers"] = int(m.group(1))
+            s = s[:m.start()] + s[m.end():]
+        return Spec("rnn", {**p, **_numbers(s)})
     if re.search(r"\bemb(edding)?\b|\bemb\.", low):
         return Spec("embedding", _numbers(s))
     if re.search(r"conv|d[ée]conv", low):
@@ -356,7 +391,7 @@ SHAPE_LINE = re.compile(r"^[\d\s×x*,()\[\]]+(?:(?:→|->)[\d\s×x*,()\[\]]+)?$"
 def shape_line(line):
     """« 3×224×224 → 64×112×112 » -> ([3, 224, 224], [64, 112, 112]) ; « 64×56×56 » -> (même, même)."""
     t = plain(line).strip()
-    if not t or not re.search(r"\d", t) or not SHAPE_LINE.match(t):
+    if not t or not re.match(r"[\d(\[]", t) or not SHAPE_LINE.match(t):
         return None
     sides = re.split(r"→|->", t)
     dims = [[int(x) for x in re.findall(r"\d+", s)] for s in sides]
@@ -383,7 +418,14 @@ def parse_text(text):
     « BN + ReLU » -> [norm, act] ; « 2× (Conv 3×3 + ReLU)\\n64 canaux » -> [conv, act], 2, 64.
     Une ligne de formes (« 3×224×224 → 64×112×112 ») donne les canaux de sortie."""
     text, shape = split_shapes(text)
-    t = " ".join(plain(text).split())
+    lines = [ln for ln in plain(text).split("\n") if ln.strip()]
+    t = " ".join(lines[0].split()) if lines else ""
+    for ln in lines[1:]:
+        ln = " ".join(ln.split())
+        alone = [parse_part(x) for x in re.split(r"\s\+\s|\+\s|\s\+", ln) if x.strip()]
+        joint = t and alone and parse_part(t) is not None and all(
+            a is not None and a.kind in ("norm", "act", "dropout", "pool", "gpool", "softmax", "flatten") for a in alone)
+        t += (" + " if joint else " ") + ln
     if not t:
         return None
     reps, rest = 1, ""
@@ -401,11 +443,115 @@ def parse_text(text):
     m = re.search(r"(\d+)\s*(canaux|channels|filtres|filters|ch\b)", rest + " " + t)
     if m:
         chans = int(m.group(1))
-    elif shape and specs[0].kind in ("conv", "linear", "embedding", "rnn") and specs[0].p.get("out") is None:
-        chans = shape[1][0] if specs[0].kind == "conv" else shape[1][-1]
+    elif shape:                                       # « BN + ReLU + Conv 1×1 » : dernière couche à taille
+        sized = [s for s in specs if s.kind in ("conv", "linear", "embedding", "rnn")]
+        if sized and sized[-1].p.get("out") is None and all(s.p.get("out") is None for s in sized):
+            chans = shape[1][0] if sized[-1].kind == "conv" else shape[1][-1]
     if shape:
         specs[0].p["_shape"] = shape
     return specs, reps, chans
+
+
+ANNOT = re.compile(r"^(?:[A-Za-z]\w{0,5}\s*:\s*)?(?:(\d+)\s*@\s*)?(\d+(?:\s*[×x*]\s*\d+){0,3})\s*(?:\((.*?)\))?$")
+
+
+def annotation(text):
+    """Taille écrite à côté d'un bloc : « 55×55×96 », « C1 : 6@28×28 », « 224×224 » -> dict, sinon None."""
+    t = " ".join(plain(text).split())
+    m = ANNOT.match(t)
+    if not m or not ("@" in t or re.search(r"\d\s*[×x*]\s*\d", t)):
+        return None
+    return {"c": int(m.group(1)) if m.group(1) else None, "dims": [int(x) for x in re.findall(r"\d+", m.group(2))]}
+
+
+def annot_split(a, kind, chans=None):
+    """Annotation -> (canaux ou None, dimensions spatiales) pour un tenseur du genre donné.
+
+    « 6@28×28 » : 6 canaux ; « 55×55×96 » : les deux côtés égaux sont H et W (ou la valeur égale aux
+    canaux connus) ; « 224×224 » : H et W seulement ; à défaut, C×H×W comme dans PyTorch."""
+    dims, c = list(a["dims"]), a["c"]
+    if not (kind and kind.startswith("img")):
+        return (c if c is not None else dims[-1]), []
+    d = int(kind[3])
+    if c is not None or len(dims) == d:
+        return c, dims[-d:]
+    if len(dims) != d + 1:
+        return None, []
+    ch = int(chans) if str(chans).isdigit() else None
+    if ch is not None and dims[-1] == ch:
+        return ch, dims[:-1]
+    if ch is not None and dims[0] == ch:
+        return ch, dims[1:]
+    if d == 2 and dims[0] == dims[1] != dims[2]:
+        return dims[2], dims[:2]
+    return dims[0], dims[1:]
+
+
+RULE_KINDS = (("conv", r"conv"), ("linear", r"\bfc\b|linear|lineaire|dense|fully|entierement"))
+
+
+def _rule_kinds(text):
+    low = text.lower()
+    kinds = {k for k, pat in RULE_KINDS if re.search(pat, low)}
+    if not kinds and re.search(r"\bcouches?\b|\blayers?\b", low):
+        kinds = {"conv", "linear"}
+    return kinds
+
+
+def _rule_specs(text):
+    """« ReLU + Dropout », « BN, ReLU » -> couches à ajouter ; « pas 1, padding 1 » -> réglages."""
+    add, settings = [], {}
+    for part in re.split(r",|\s\+\s|\+|\bet\b|\band\b|;", text):
+        part = part.strip()
+        if not part:
+            continue
+        sp = parse_part(part)
+        if sp is not None and sp.kind in ("act", "dropout", "norm"):
+            add.append(sp)
+            continue
+        nums = _numbers(plain(part))
+        settings.update({k: v for k, v in nums.items() if k in ("stride", "pad", "k") and isinstance(v, int)})
+    return add, settings
+
+
+def note_rules(text):
+    """Note générale du schéma -> règles appliquées à chaque couche d'un genre :
+    « ReLU après chaque convolution et FC », « activations : tanh », « Conv : pas 1, padding 1, ReLU »,
+    « FC 4096 : ReLU + Dropout ». Règle : {kinds, out, add, set}."""
+    rules, buf = [], []
+    for line in plain(text).split("\n"):
+        ln = " ".join(line.split())
+        m = re.match(r"^activations?\b[^:]*:\s*(.+)$", ln, re.I)
+        if m:
+            add, _ = _rule_specs(m.group(1))
+            add = [a for a in add if a.kind == "act"]
+            if add:
+                rules.append({"kinds": {"conv", "linear"}, "out": None, "add": add, "set": {}})
+            continue
+        m = re.match(r"^((?:couches?\s+)?(?:conv\w*|fc|linear\w*|dense|lineaires?))(?:\s+(\d+))?\s*:\s*(.+)$", ln, re.I)
+        if m and _rule_kinds(m.group(1)):
+            add, settings = _rule_specs(m.group(3))
+            if add or settings:
+                rules.append({"kinds": _rule_kinds(m.group(1)), "out": int(m.group(2)) if m.group(2) else None,
+                              "add": add, "set": settings})
+            continue
+        buf.append(ln)
+    sent = " ".join(buf)
+    m = re.match(r"^(.*?)\b(?:suivi|followed)e?s?\s+(?:de|d'|par|by)\s*(?:une?\s+|an?\s+)?(.+)$", sent, re.I)
+    if m:
+        add, _ = _rule_specs(m.group(2))
+        kinds = _rule_kinds(m.group(1))
+        if add and kinds:
+            rules.append({"kinds": kinds, "out": None, "add": add, "set": {}})
+        return rules
+    m = re.match(r"^(.+?)\s+(?:apres|after|derriere|suivant)\s+(?:chaque|each|every|toutes?\s+les|tous\s+les|all|les|the)"
+                 r"\s+(.+)$", sent, re.I)
+    if m:
+        add, _ = _rule_specs(m.group(1))
+        kinds = _rule_kinds(m.group(2))
+        if add and kinds:
+            rules.append({"kinds": kinds, "out": None, "add": add, "set": {}})
+    return rules
 
 
 def hidden_layers(tree, parent_hidden=False):
@@ -954,6 +1100,7 @@ class Generator:
         self.defs = {}               # clé de titre -> scope de définition
         self.def_classes = {}        # clé -> ClassCode construite
         self.notes = list(self.g.notes)
+        self.rules = []              # notes générales : « ReLU après chaque convolution »…
 
     # ---------------------------------------------------------------- portées
     def components(self):
@@ -1018,8 +1165,32 @@ class Generator:
         return titles
 
     # ---------------------------------------------------------------- entrée
+    def read_notes(self):
+        """Tailles écrites à côté d'un bloc (« 55×55×96 ») : forme de sa sortie ; notes générales
+        (« ReLU après chaque convolution et FC ») : règles appliquées aux couches."""
+        g = self.g
+        for t in g.texts():
+            if t.data or g.ins(t.uid) or g.outs(t.uid) or t.bold or t.fs >= 15:
+                continue
+            a = annotation(t.text)
+            if a is None:
+                self.rules += note_rules(t.text)
+                continue
+            best = None
+            for n in g.nodes.values():
+                if n.type != "block":
+                    continue
+                dx = max(n.x - (t.x + t.w), 0, t.x - (n.x + n.w))
+                dy = max(n.y - (t.y + t.h), 0, t.y - (n.y + n.h))
+                if ((dy == 0 and dx <= 40) or (dx == 0 and dy <= 30)) and (best is None or dx + dy < best[0]):
+                    best = (dx + dy, n)
+            if best:
+                best[1].data["annot"] = a
+                t.data["annot"] = True
+
     def run(self):
         g = self.g
+        self.read_notes()
         comps = self.components()
         titles = self.assign_titles(comps)
         # noms près des cadres (« conv2_x » à droite d'un cadre 2×)
@@ -1039,7 +1210,7 @@ class Generator:
         block_keys = {}
         for u, n in g.nodes.items():
             if n.type == "block":
-                for k in {norm_key(n.text), norm_key(first_line(n.text))}:
+                for k in {norm_key(n.text), norm_key(first_line(n.text)), norm_key(first_line(ref_text(n.text)))}:
                     block_keys.setdefault(k, set()).add(u)
         mains = []
         for i, comp in enumerate(comps):
@@ -1167,7 +1338,7 @@ class Generator:
         return code
 
     def render_main(self):
-        tops = [c for c in self.classes if c.top]
+        tops = [c for c in self.classes if c.top and c.forward_args]
         lines = ['if __name__ == "__main__":',
                  "    # essai : entrées aléatoires de forme plausible (TODO : formes réelles)"]
         for cc in tops:
@@ -1242,6 +1413,17 @@ class PatchEmbedding(nn.Module):
     def forward(self, x):
         return self.proj(x).flatten(2).transpose(1, 2)
 ''',
+    "ChannelLayerNorm": '''
+class ChannelLayerNorm(nn.Module):
+    """LayerNorm sur les canaux d'une image ou d'un signal (B, C, …), comme dans ConvNeXt."""
+
+    def __init__(self, channels):
+        super().__init__()
+        self.norm = nn.LayerNorm(channels)
+
+    def forward(self, x):
+        return self.norm(x.movedim(1, -1)).movedim(-1, 1)
+''',
 }
 
 
@@ -1271,7 +1453,6 @@ class ClassBuilder:
         self.var_used = set()
         self.values = {}                          # (uid, port) -> Value
         self.consumers = {}
-        self.stride_done = False
         self.inputs_spec = []
         self.forward_args = []
         self.shared = {}                          # uid -> ensemble de nœuds qui partagent un module
@@ -1279,6 +1460,11 @@ class ClassBuilder:
         self.in_syms = {}                         # in_channels… -> (défaut, lu dans le schéma, libellé, indice)
         self.bound = {}                           # symbole du schéma -> taille suivie (« C » de « C → 4C »)
         self.out_meta = (None, None)
+        self.pad_votes = {"valid": 0, "same": 0}  # padding des convolutions lu dans le schéma
+        self._ends = {}
+        self.cls_token = False                    # jeton de classe ajouté (ViT) : la tête le lit
+        self.kl_terms = None                      # (μ, log σ²) d'un échantillonnage
+        self.stride_nodes = set()                 # couches qui reçoivent le pas d'un bloc détaillé
 
     # ---------------------------------------------------------------- tailles d'entrée
     def in_size(self, feat, todos, kind=None, what="le nombre de canaux d'entrée"):
@@ -1311,6 +1497,9 @@ class ClassBuilder:
         """Ligne de formes du schéma (« → 64×56×56 ») : taille de sortie exacte."""
         kind, feat = meta[0], meta[1]
         if kind and kind.startswith("img") and len(out) > 1:
+            sp = hw_of(meta)
+            if sp is not None and list(out[:-1]) == list(sp.dims) and list(out[1:]) != list(sp.dims):
+                return (kind, feat if feat is not None else str(out[-1]), Spatial(tuple(out[:-1])))  # (H, W, C)
             return (kind, feat if feat is not None else str(out[0]), Spatial(tuple(out[1:])))
         if kind in ("vec", "seq") and out:
             return (kind, feat if feat is not None else str(out[-1]))
@@ -1323,6 +1512,11 @@ class ClassBuilder:
             nums = [x for x in re.findall(r"\b\d+\b", re.sub(r"\(.*?\)", "", t)) if int(x) >= 2]
             return (int(nums[0]) if nums else 64), None, bool(nums), False
         d = int(kind[3])
+        a = n.data.get("annot")
+        if a is not None:
+            c, hw = annot_split(a, kind)
+            if c and len(hw) == d:
+                return c, tuple(hw), True, True
         m = KERNEL.search(t)
         dims = [int(x) for x in re.findall(r"\d+", m.group(0))] if m and "patch" not in t.lower() else []
         word = 3 if re.search(r"\brgb\b|\bcouleurs?\b|\bcolou?r\b", t, re.I) else \
@@ -1426,6 +1620,8 @@ class ClassBuilder:
         order = self.topo(nodes)
         self.compute_sharing(order)
         self.pre_absorb(order)
+        if self.kind == "def" and self.strided:
+            self.stride_nodes = self.stride_targets(order)
         # entrées
         inputs = [u for u in order if self.is_source(u)]
         inputs.sort(key=lambda u: self.input_sort_key(u))
@@ -1471,6 +1667,11 @@ class ClassBuilder:
                 returns.append((self.values[(u, 0)], n))
         if not returns:
             returns = [(v, None) for k, v in self.values.items() if v.is_input][:1]
+
+        def out_rank(r):                              # « Output 1 », « Output 2 »… dans l'ordre
+            m = re.search(r"(\d+)\s*$", first_line(r[1].text)) if r[1] is not None else None
+            return int(m.group(1)) if m else 0
+        returns.sort(key=out_rank)
         self.finish_returns(returns)
         self.inputs_spec = [(nm, kind, self.example_shape(*a)) for nm, kind, a in self.inputs_spec]
         # tailles d'entrée (in_channels…) : paramètres en tête, s'ils servent
@@ -1499,6 +1700,10 @@ class ClassBuilder:
     def finish_returns(self, returns):
         if returns:
             self.out_meta = returns[0][0].meta
+        kl = self.kl_terms            # échantillonnage : μ et log σ² servent à la perte KL
+        if kl and self.kind == "main" and returns and not any(v.name in (kl[0].name, kl[1].name) for v, _ in returns):
+            returns = returns + [(kl[0], None), (kl[1], None)]
+            self.kl_note = True
         seen, vals, labels = set(), [], []
         for v, n in returns:
             if id(v) in seen:
@@ -1512,6 +1717,8 @@ class ClassBuilder:
             self.fwd.append("return None  # TODO : aucune sortie trouvée dans le schéma")
             return
         com = ", ".join(lab for lab in labels if lab)
+        if getattr(self, "kl_note", False):
+            com = (com + " ; " if com else "") + f"{vals[-2]} et {vals[-1]} : pour la perte KL"
         self.fwd.append(f"return {', '.join(vals)}" + (f"  # {com}" if com else ""))
 
     # ---------------------------------------------------------------- tri
@@ -1559,8 +1766,89 @@ class ClassBuilder:
         return order
 
     # ---------------------------------------------------------------- classification
-    def node_specs(self, u):
-        """Spec(s) d'un nœud : (liste, répétition, canaux) ; None si non reconnu."""
+    def node_specs(self, u, rules=True):
+        """Spec(s) d'un nœud : (liste, répétition, canaux) ; None si non reconnu. Avec rules, les notes
+        générales du schéma (« ReLU après chaque convolution ») ajoutent leurs couches."""
+        r = self._node_specs(u)
+        n = self.g.nodes[u]
+        if r is None or n.type != "block" or r[0][0].kind not in SIMPLE:
+            return r
+        specs, reps, chans = r
+        a = n.data.get("annot")
+        if a is not None:
+            i = max((i for i, sp in enumerate(specs) if sp.kind in ("conv", "pool")), default=len(specs) - 1)
+            specs[i].p["_annot"] = a
+            if chans is None and a.get("c") and specs[0].kind == "conv" and specs[0].p.get("out") is None:
+                chans = a["c"]
+        if rules and self.gen.rules:
+            specs = self.apply_rules(u, specs)
+        return specs, reps, chans
+
+    def neighbor_kind(self, u, specs, i, step):
+        """Genre de la couche voisine de specs[i] (step = 1 : la suivante, -1 : la précédente) ;
+        « lrn » pour une LRN, qui se place après l'activation (AlexNet), au contraire des autres normes."""
+        j = i + step
+        if 0 <= j < len(specs):
+            return "lrn" if specs[j].p.get("op") == "lrn" else specs[j].kind
+        es = self.g.outs(u) if step > 0 else self.g.ins(u)
+        if len(es) != 1:
+            return None
+        w = es[0].dst if step > 0 else es[0].src
+        if self.g.nodes[w].type != "block":
+            return None
+        sp = self._node_specs(w)
+        if not sp:
+            return None
+        nb = sp[0][0] if step > 0 else sp[0][-1]
+        return "lrn" if nb.p.get("op") == "lrn" else nb.kind
+
+    def ends_net(self, u):
+        """Vrai si seules des activations (Softmax, Dropout) séparent u d'une sortie."""
+        if u in self._ends:
+            return self._ends[u]
+        self._ends[u] = False
+        g, res = self.g, True
+        outs = g.outs(u)
+        if not outs and g.nodes[u].data.get("inside") in g.nodes:
+            outs = g.outs(g.nodes[u].data["inside"])
+        for e in outs:
+            w = e.dst
+            if self.is_sink(w):
+                continue
+            k = self.spec0(w) if g.nodes[w].type in ("block", "edgeop") else "op"
+            if k not in ("act", "softmax", "dropout", "identity") or not self.ends_net(w):
+                res = False
+                break
+        self._ends[u] = res
+        return res
+
+    def apply_rules(self, u, specs):
+        """Notes générales : réglages des couches visées, couches ajoutées après chacune (sauf si le
+        schéma les dessine déjà, ou avant la sortie du réseau) ; après une norme si elle suit."""
+        out = []
+        sized = [i for i, sp in enumerate(specs) if sp.kind in ("conv", "linear", "norm")]
+        for i, sp in enumerate(specs):
+            out.append(sp)
+            for r in self.gen.rules:
+                target = sp.kind in r["kinds"] and (r["out"] is None or sp.p.get("out") == r["out"])
+                if target:
+                    for k, v in r["set"].items():
+                        if sp.p.get(k) is None:
+                            sp.p[k] = v
+                if not r["add"]:
+                    continue
+                nk = self.neighbor_kind(u, specs, i, 1)
+                host = (target and nk != "norm") or (sp.kind == "norm" and sp.p.get("op") != "lrn" and
+                                                     self.neighbor_kind(u, specs, i, -1) in r["kinds"])
+                if not host or (sized and i == sized[-1] and self.ends_net(u)):
+                    continue
+                for a in r["add"]:
+                    if a.kind == nk or (a.kind == "norm" and sp.kind == "norm"):
+                        break
+                    out.append(Spec(a.kind, dict(a.p)))
+        return out
+
+    def _node_specs(self, u):
         n = self.g.nodes[u]
         if n.type == "edgeop":
             return n.data["specs"], 1, None
@@ -1573,7 +1861,7 @@ class ClassBuilder:
         if n.def_id and n.def_id in self.gen.user_defs:
             return [Spec("user", {"expr": self.gen.user_defs[n.def_id]})], 1, None
         key_full, key_first = norm_key(n.text), norm_key(first_line(n.text))
-        for k in (key_full, key_first):
+        for k in (key_full, key_first, norm_key(first_line(ref_text(n.text)))):
             if k and k in self.gen.defs and u not in self.gen.defs[k]["comp"]:
                 return [Spec("defref", {"key": k})], 1, None
         base = DEF_SPECS.get(n.def_id)
@@ -1741,11 +2029,13 @@ class ClassBuilder:
     def example_shape(self, u, n, meta):
         """Forme de l'entrée de l'essai (appelée en fin de construction : réglages connus)."""
         kind = meta[0]
+        sh = split_shapes(n.text)[1]
         if kind == "tokens":
-            return "(1, 16)"
+            return f"(1, {sh[1][0]})" if sh and len(sh[1]) == 1 else "(1, 16)"
         if kind == "seq":
             feat = meta[1] if meta[1] is not None else "d_model"
-            return f"(1, 16, {self.params.get(feat, feat if str(feat).isdigit() else 64)})"
+            t = sh[1][0] if sh and len(sh[1]) == 2 else 16
+            return f"(1, {t}, {self.params.get(feat, feat if str(feat).isdigit() else 64)})"
         c, hw, _, _ = self.input_dims(u, n, kind if kind and kind.startswith("img") else "vec")
         if kind and kind.startswith("img"):
             return "(" + ", ".join(map(str, (1, c) + tuple(hw))) + ")"
@@ -1915,8 +2205,55 @@ class ClassBuilder:
             for u in s:
                 self.shared[u] = s
 
+    def stride_targets(self, order):
+        """Couches qui reçoivent le pas d'un bloc détaillé : sur chaque branche partant de l'entrée, la
+        première convolution (ou pooling) de noyau > 1 ; une branche sans autre couche spatiale (raccourci
+        Conv 1×1) : sa première convolution."""
+        g = self.g
+
+        def kernel(c):
+            if g.nodes[c].type not in ("block", "edgeop"):
+                return None
+            sp = self.node_specs(c, rules=False)
+            for s in (sp[0] if sp else []):
+                if s.kind == "conv":
+                    return s.p.get("k") or (2 if s.p.get("transposed") else 3)
+                if s.kind == "pool":
+                    return s.p.get("k") or 2
+            return None
+
+        def members(u):
+            n = g.nodes[u]
+            return n.data["chain"] if n.type == "sub" and n.data.get("mode") == "seq" else [u]
+
+        def wide_later(u, start):
+            if any((kernel(c) or 0) > 1 for c in members(u)[start:]):
+                return True
+            v = u
+            for _ in range(len(order)):
+                outs = g.outs(v)
+                if len(outs) != 1 or len(g.ins(outs[0].dst)) != 1 or g.nodes[outs[0].dst].type == "operator":
+                    return False
+                v = outs[0].dst
+                if any((kernel(c) or 0) > 1 for c in members(v)):
+                    return True
+            return False
+
+        targets, after = set(), set()
+        for u in order:
+            if any(e.src in after for e in g.ins(u)):
+                after.add(u)
+                continue
+            for i, c in enumerate(members(u)):
+                k = kernel(c)
+                if k is not None and (k > 1 or not wide_later(u, i + 1)):
+                    targets.add(c)
+                    after.add(u)
+                    break
+        return targets
+
     def spec0(self, u):
-        sp = self.node_specs(u) if self.g.nodes[u].type in ("block", "edgeop") else None
+        sp = self.node_specs(u, rules=False) if self.g.nodes[u].type in ("block", "edgeop") else None
         return sp[0][0].kind if sp else None
 
     def pre_absorb(self, order):
@@ -1926,13 +2263,18 @@ class ClassBuilder:
         for u in order:
             if self.spec0(u) == "noise" and g.outs(u) and all(self.spec0(e.dst) == "sampling" for e in g.outs(u)):
                 g.nodes[u].data["absorbed"] = True
+            elif self.spec0(u) == "noise" and not g.ins(u) and g.outs(u) and \
+                    all(g.nodes[e.dst].type == "operator" for e in g.outs(u)):
+                g.nodes[u].data["absorbed"] = True            # ε ~ N(0, I) : torch.randn_like(autre entrée)
+                for e in g.outs(u):
+                    g.nodes[e.dst].data.setdefault("noise", []).append(u)
         for u in order:
             n = g.nodes[u]
             if n.type != "operator":
                 continue
             for e in g.ins(u):
                 s = g.nodes[e.src]
-                if s.type == "block" and not g.ins(e.src) and s.ref.startswith("param:"):
+                if s.type == "block" and not g.ins(e.src) and s.ref.rsplit("/", 1)[-1].startswith("param:"):
                     s.data["absorbed"] = True
                     n.data.setdefault("params", []).append(e.src)
             if (n.symbol or "plus") != "plus":
@@ -1978,6 +2320,8 @@ class ClassBuilder:
                 name = self.var(base)
             elif n.type == "block" and self.role(u) == "layer" and parse_text(n.text) is None:
                 name = self.var(ident(n.text, "x"))
+            elif n.type == "block" and block_name(n.text):
+                name = self.var(block_name(n.text))
             else:
                 name = self.var("x")
         if not hint and len(ins) == 1:
@@ -2039,21 +2383,40 @@ class ClassBuilder:
         return out
 
     def param_operand(self, p_uid, sym, ins, names):
-        """Paramètre appris (jeton de classe, position) : nn.Parameter de forme déduite de l'autre entrée."""
+        """Paramètre appris (jeton de classe, position, échelle) : nn.Parameter de la forme écrite dans
+        le bloc (« 1×1×768 »), sinon déduite de l'autre entrée."""
         pn = self.g.nodes[p_uid]
         nm = self.attr(ident(pn.text, "param"))
         meta = ins[0][0].meta if ins else (None, None)
         d = meta[1] or self.hp("d_model")
         x = names[0] if names else "x"
+        sh = split_shapes(pn.text)[1]
+        shape = ", ".join("C" if self.kind == "def" and x == getattr(self, "def_cout", None) and x > 1 else str(x)
+                          for x in sh[1]) if sh else None
+        init = "ones" if sym in ("times", "dot") else "zeros"     # échelle : 1 ; décalage, jeton : 0
+        com = label_line(split_shapes(pn.text)[0]) or "paramètre"
         if meta[0] == "seq" and sym == "concat":
-            self.init.append(f"self.{nm} = nn.Parameter(torch.zeros(1, 1, {d}))  # {label_line(pn.text)}")
+            self.init.append(f"self.{nm} = nn.Parameter(torch.zeros({shape or f'1, 1, {d}'}))  # {com}")
             expr = f"self.{nm}.expand({x}.size(0), -1, -1)"
-            return [expr] + names if re.search(r"token|cls|class", pn.text, re.I) else names + [expr]
+            if re.search(r"token|cls|class", pn.text, re.I):
+                self.cls_token = True
+                return [expr] + names
+            return names + [expr]
         if meta[0] == "seq":
-            self.init.append(f"self.{nm} = nn.Parameter(torch.zeros(1, {self.hp('max_len', 1024)}, {d}))"
-                             f"  # {label_line(pn.text)} (max_len positions)")
+            if shape:
+                self.init.append(f"self.{nm} = nn.Parameter(torch.zeros({shape}))  # {com}")
+            else:
+                self.init.append(f"self.{nm} = nn.Parameter(torch.zeros(1, {self.hp('max_len', 1024)}, {d}))"
+                                 f"  # {com} (max_len positions)")
             return names + [f"self.{nm}[:, :{x}.size(1)]"]
-        self.init.append(f"self.{nm} = nn.Parameter(torch.zeros(1))  # {label_line(pn.text)} — TODO : forme")
+        if shape:
+            self.init.append(f"self.{nm} = nn.Parameter(torch.{init}({shape}))  # {com}")
+        elif meta[0] and meta[0].startswith("img"):
+            ones = ", 1" * int(meta[0][3])
+            self.init.append(f"self.{nm} = nn.Parameter(torch.{init}({d}{ones}))  # {com} — TODO : forme supposée "
+                             "(un coefficient par canal)")
+        else:
+            self.init.append(f"self.{nm} = nn.Parameter(torch.{init}(1))  # {com} — TODO : forme")
         return names + [f"self.{nm}"]
 
     def combine(self, u, ins):
@@ -2077,11 +2440,7 @@ class ClassBuilder:
         g = self.g
         n = g.nodes[u]
         x, meta, hint = self.combine(u, ins)
-        stride_param = None
-        if self.kind == "def" and self.strided and not self.stride_done and \
-                any(s.kind in ("conv", "pool") for s in specs):
-            stride_param = "stride"
-            self.stride_done = True
+        stride_param = "stride" if u in self.stride_nodes else None
         last = self.is_last_layer(u)
         sized = [i for i, s in enumerate(specs) if s.kind not in ("act", "softmax", "dropout", "identity")]
         last_i = sized[-1] if sized else len(specs) - 1
@@ -2090,12 +2449,14 @@ class ClassBuilder:
             chans = dp[2] if dp else None
             if chans is None and dp and dp[0][0].p.get("out") is not None:
                 chans = dp[0][0].p.get("out")
+        if specs[0].kind == "head" and meta[0] == "seq" and self.cls_token:
+            x, meta = f"{x}[:, 0]", ("vec", meta[1])           # jeton de classe (ViT)
         ctors, meta, todos = self.run_specs(specs, reps, chans, meta, stride_param, last, last_i)
         todos = list(dict.fromkeys(todos))
         if not ctors:
             return self.passthrough(u, ins, x, meta, hint, todos)
         ctor = ctors[0] if len(ctors) == 1 else "nn.Sequential(\n    " + ",\n    ".join(ctors) + ",\n)"
-        base = self.attr_base(specs, n)
+        base = self.attr_base(specs * max(1, reps), n)
         att = self.module_attr(u, base, ctor, n, todos)
         extra, com = "", self.comment(n)
         skip = self.concat_partner(u) if len(ctors) == 1 and ctors[0].startswith("nn.ConvTranspose") else None
@@ -2126,6 +2487,7 @@ class ClassBuilder:
     def run_specs(self, specs, reps, chans, meta, stride_param=None, last=False, last_i=None):
         """Couches d'un bloc, la taille suivie de l'une à l'autre -> (constructeurs, meta, todos)."""
         ctors, todos = [], []
+        strided = stride_param is not None
         for _ in range(max(1, reps)):
             for i, s in enumerate(specs):
                 c, meta, t = self.layer(s, meta, chans, stride_param, last and i == last_i)
@@ -2136,6 +2498,11 @@ class ClassBuilder:
         sh = specs[0].p.get("_shape") if specs else None
         if sh:
             meta = self.shape_meta(meta, sh[1])
+        a = next((s.p["_annot"] for s in specs if "_annot" in s.p), None)
+        if a is not None and meta[0] and meta[0].startswith("img") and not strided:
+            hw = annot_split(a, meta[0], meta[1])[1]
+            if hw and len(hw) == int(meta[0][3]):
+                meta = (meta[0], meta[1], Spatial(tuple(hw)))
         return ctors, meta, todos
 
     def passthrough(self, u, ins, x, meta, hint, todos):
@@ -2173,6 +2540,9 @@ class ClassBuilder:
             self.init.append(lines[-1] + tail)
 
     def attr_base(self, specs, n):
+        named = block_name(n.text) if n.type == "block" else ""
+        if named:
+            return named
         names = {"conv": "conv", "pool": "pool", "gpool": "pool", "upsample": "up", "norm": "norm",
                  "act": "act", "softmax": "softmax", "dropout": "dropout", "flatten": "flatten",
                  "linear": "fc", "embedding": "embedding", "ff": "feed_forward", "mlp": "mlp",
@@ -2193,7 +2563,7 @@ class ClassBuilder:
             base = base + "_" + names.get(specs[1].kind, specs[1].kind)
         elif len(specs) > 1 and s.kind in ("norm",) and specs[1].kind == "act":
             base = base + "_" + specs[1].p.get("op", "act")
-        if len(specs) > 1 and all(x.kind == s.kind or x.kind == "act" for x in specs) and s.kind == "conv":
+        if sum(x.kind == "conv" for x in specs) > 1 and all(x.kind in ("conv", "act") for x in specs):
             base = "convs"
         par = self.g.nodes.get(n.parent) if n.parent is not None else None
         if par is not None and par.type == "group" and par.label.strip() and not \
@@ -2245,6 +2615,8 @@ class ClassBuilder:
                 v = chans
             if self.kind == "def" and v is not None and v == getattr(self, "def_cout", None):
                 v = "C"
+            elif self.kind == "def" and isinstance(v, int):
+                v = self.relative_to_c(v)
             if self.kind == "def" and v is None and getattr(self, "def_auto_c", False):
                 v = "C"                              # « Bloc Conv / 64 → 128 » : C fourni par chaque bloc
             if v is None and last:
@@ -2264,9 +2636,21 @@ class ClassBuilder:
                 todos.append(f"le schéma indique {shown} canaux d'entrée")
             return self.in_size(feat if feat is not None else shown, todos)
 
-        def exact_pad(ks, st):
+        annot = p.get("_annot")
+
+        def annot_hw(chans_out=None):
+            """Côtés de la sortie écrits à côté du bloc (« 55×55×96 »), ou None."""
+            if annot is None:
+                return None
+            hw = annot_split(annot, img or "img2d", chans_out)[1]
+            return hw if hw and (sp is None or len(hw) == len(sp.dims)) else None
+
+        def exact_pad(ks, st, chans_out=None):
             if sh and len(sh[0]) > 1 and len(sh[1]) > 1 and isinstance(st, int) and isinstance(ks, int):
                 return max(0, -(-((sh[1][-1] - 1) * st + ks - sh[0][-1]) // 2))
+            hw = annot_hw(chans_out)
+            if hw and sp is not None and isinstance(st, int) and isinstance(ks, int):
+                return max(0, -(-((hw[-1] - 1) * st + ks - sp.dims[-1]) // 2))
             return None
 
         if k == "conv":
@@ -2283,8 +2667,14 @@ class ClassBuilder:
                     (f", padding={tp}" if tp else "") + ")"
                 nsp = conv_dims(sp, ks, run_st, tp, transposed=True)
             else:
-                pad = p.get("pad") if p.get("pad") is not None else exact_pad(ks, st)
+                pad = p.get("pad") if p.get("pad") is not None else exact_pad(ks, st, out)
                 guessed = pad is None and isinstance(ks, int) and ks > 1
+                if not guessed and isinstance(ks, int) and ks > 1 and st == 1:     # habitude du schéma
+                    vote = "valid" if pad == 0 else "same" if pad == ks // 2 else "other"
+                    self.pad_votes[vote] = self.pad_votes.get(vote, 0) + 1
+                if pad is None and self.pad_votes["valid"] > self.pad_votes["same"]:
+                    pad = 0                                     # convolutions « valid » ailleurs dans le schéma
+                    todos.append("padding 0 supposé, comme les autres convolutions du schéma")
                 if pad is None:
                     pad = max(0, (ks - st + 1) // 2) if isinstance(st, int) else ks // 2
                 args = [f"kernel_size={ks}"]
@@ -2300,6 +2690,8 @@ class ClassBuilder:
                 nsp = conv_dims(sp, ks, run_st, pad, guessed=guessed)
             if sh and len(sh[1]) > 1:
                 nsp = Spatial(tuple(sh[1][1:]))
+            elif annot_hw(out) and not stride_param:
+                nsp = Spatial(tuple(annot_hw(out)))
             if kind == "seq":
                 todos.append("convolution sur une séquence : passer en (B, C, T) avec x.transpose(1, 2)")
             return [c], (f"img{d}d", out, nsp), todos
@@ -2310,7 +2702,7 @@ class ClassBuilder:
             args = [f"kernel_size={ks}"]
             stv = stride_param or str(st)
             args.append(f"stride={stv}")
-            pad = exact_pad(ks, st)
+            pad = exact_pad(ks, st, feat)
             guessed = pad is None and isinstance(ks, int) and isinstance(st, int) and ks > st
             if pad is None:
                 pad = ks // 2 if st == 1 and not stride_param else 0
@@ -2319,6 +2711,8 @@ class ClassBuilder:
             nsp = conv_dims(sp, ks, st if not stride_param else None, pad, guessed=guessed)
             if sh and len(sh[1]) > 1:
                 nsp = Spatial(tuple(sh[1][1:]))
+            elif annot_hw(feat) and not stride_param:
+                nsp = Spatial(tuple(annot_hw(feat)))
             return [f"nn.{op}Pool{dim}d({', '.join(args)})"], (img or "img2d", feat, nsp), todos
         if k == "gpool":
             op = "Max" if p.get("op") == "max" else "Avg"
@@ -2351,8 +2745,9 @@ class ClassBuilder:
                 return [f"nn.GroupNorm({p.get('groups') or 32}, {f})"], meta, todos
             if op == "rms":
                 return [f"nn.RMSNorm({f})"], meta, todos
-            if img:
-                todos.append("LayerNorm sur une image : préciser les dimensions normalisées")
+            if img:                                  # LayerNorm des canaux, position par position (ConvNeXt)
+                self.gen.helper("ChannelLayerNorm")
+                return [f"ChannelLayerNorm({f})"], meta, todos
             return [f"nn.LayerNorm({f})"], meta, todos
         if k == "act":
             if p.get("guess"):
@@ -2369,6 +2764,13 @@ class ClassBuilder:
         if k == "flatten":
             return ["nn.Flatten()"], ("vec", self.flat_size(feat, sp, todos) if img else
                                       (feat if kind == "vec" else None)), todos
+        positions = 1
+        for x in (sp.dims if sp is not None else ()):
+            positions *= x
+        if k == "linear" and img and isinstance(p.get("in"), int) and sp is not None and positions > 1 and \
+                (str(feat) == str(p["in"]) or (not sp.why and p["in"] < positions)):
+            out = out_size(128, "la taille de sortie")      # même calcul en chaque position : Conv 1×1
+            return [f"nn.Conv{dim}d({feat}, {out}, kernel_size=1)"], (img, out, sp), todos
         if k in ("linear", "head"):
             pre = []
             if img:
@@ -2394,8 +2796,11 @@ class ClassBuilder:
                 out = out_size(128, "la taille de sortie")
             return pre + [f"nn.Linear({fin}, {out})"], (kind or "vec", out), todos
         if k == "embedding":
-            d = self.size_expr(p.get("out"), "d_model")
-            return [f"nn.Embedding({self.hp('vocab_size')}, {d})"], ("seq", d), todos
+            d = self.size_expr(p.get("out"), None)
+            if d is None:
+                d = str(sh[1][-1]) if sh and len(sh[1]) > 1 else self.hp("d_model")
+            voc = str(p["in"]) if isinstance(p.get("in"), int) else self.hp("vocab_size")
+            return [f"nn.Embedding({voc}, {d})"], ("seq", d), todos
         if k == "ff" or k == "mlp":
             d = feat or self.hp("d_model")
             act = "nn.ReLU()" if k == "ff" else "nn.GELU()"
@@ -2409,6 +2814,7 @@ class ClassBuilder:
             d = feat or self.hp("d_model")
             if p.get("learned"):
                 self.gen.helper("PositionEmbedding")
+                self.cls_token = self.cls_token or bool(p.get("cls"))
                 return [f"PositionEmbedding({d}" + (", class_token=True" if p.get("cls") else "") + ")"], meta, todos
             self.gen.helper("PositionalEncoding")
             return [f"PositionalEncoding({d})"], meta, todos
@@ -2455,8 +2861,21 @@ class ClassBuilder:
         todo = ""
         for p_uid in n.data.get("params", []):         # paramètre du modèle posé à côté de l'opérateur
             names = self.param_operand(p_uid, sym, ins, names)
+        for z_uid in n.data.get("noise", []):          # bruit : même forme que l'autre entrée
+            if names:
+                eps = self.var(ident(re.sub(r"(?i)^\s*(noise|bruit)\s*", "", first_line(self.g.nodes[z_uid].text)), "eps"))
+                self.fwd.append(f"{eps} = torch.randn_like({names[0]}){self.comment(self.g.nodes[z_uid])}")
+                names = names + [eps]
+        bcast = {}                                     # vecteur (B, C) combiné à une image : (B, C, 1, 1)
+        if sym in ("plus", "times", "dot", "minus"):
+            img = next((v for v, _ in ins if v.meta[0] and v.meta[0].startswith("img")), None)
+            if img is not None:
+                for v, _ in ins:
+                    if v.meta[0] == "vec":
+                        bcast[v.name] = v.name + "[:, :" + ", None" * int(img.meta[0][3]) + "]"
+                names = [bcast.get(nm, nm) for nm in names]
         if sym in ("plus", "times", "dot", "minus"):          # taille : celle d'une entrée calculée
-            known = [v for v, _ in ins if v.meta[1] is not None]
+            known = [v for v, _ in ins if v.meta[1] is not None and v.name not in bcast]
             pref = [v for v in known if not v.is_input] or known
             if pref:
                 meta = pref[0].meta
@@ -2585,11 +3004,20 @@ class ClassBuilder:
             data = rnn_ins[:1]
             rnn_ins = rnn_ins[1:]
         x, meta, hint = self.combine(u, data)
+        if meta[0] and meta[0].startswith("img"):          # sortie de convolutions : séquence de positions
+            nm = self.var("seq")
+            flat = "" if meta[0] == "img1d" else ".flatten(2)"
+            self.fwd.append(f"{nm} = {x}{flat}.transpose(1, 2)  # (B, C, …) -> (B, positions, C)")
+            x, meta = nm, ("seq", meta[1])
         feat = meta[1] or self.hp("d_model")
-        hid = self.size_expr(s.p.get("out"), "hidden_size")
+        sh = s.p.get("_shape")
+        hid = self.size_expr(s.p.get("out"), None)
+        if hid is None:                              # « 20×64 → 20×128 » : taille de l'état
+            hid = str(sh[1][-1] // (2 if s.p.get("bi") else 1)) if sh else self.hp("hidden_size")
         cell = s.p.get("cell", "LSTM")
         bi = ", bidirectional=True" if s.p.get("bi") else ""
-        ctor = f"nn.{cell}({feat}, {hid}, batch_first=True{bi})"
+        nl = f", num_layers={s.p['layers']}" if s.p.get("layers", 1) > 1 else ""
+        ctor = f"nn.{cell}({feat}, {hid}{nl}, batch_first=True{bi})"
         base = cell.lower()
         par = g.nodes.get(n.parent) if n.parent is not None else None
         if par is not None and par.type == "group" and par.label.strip():
@@ -2611,6 +3039,18 @@ class ClassBuilder:
         args = x + (f", {rnn_ins[0][0].name}" if rnn_ins else "")
         lhs = f"{o.name if o else '_'}, {st.name if st else '_'}"
         self.fwd.append(f"{lhs} = self.{att}({args}){self.comment(n)}")
+
+    def emit_select(self, u, ins, s):
+        """« Sélection [:, 0] » : indexation ; un indice entier retire une dimension (jeton de classe,
+        dernier pas d'un RNN)."""
+        v = ins[0][0]
+        idx = s.p["idx"]
+        parts = [x.strip() for x in idx.strip("[]").split(",")]
+        meta = v.meta
+        if meta[0] == "seq" and len(parts) == 2 and re.fullmatch(r"-?\d+", parts[1]):
+            meta = ("vec", meta[1])
+        out = self.out_value(u, [], meta)
+        self.fwd.append(f"{out.name} = {v.name}{idx}{self.comment(self.g.nodes[u])}")
 
     def emit_matmul(self, u, ins, s):
         if len(ins) < 2:
@@ -2661,6 +3101,7 @@ class ClassBuilder:
         if lv is not None:
             self.fwd.append(f"{out.name} = {mu.name} + torch.exp(0.5 * {lv.name}) * torch.randn_like({mu.name})"
                             + self.comment(self.g.nodes[u]))
+            self.kl_terms = (mu, lv)
         else:
             self.fwd.append(f"{out.name} = {mu.name} + torch.randn_like({mu.name})  # TODO : écart-type")
 
@@ -2708,7 +3149,8 @@ class ClassBuilder:
         cc = self.gen.def_class(key)
         if cc is None:
             return None, None, None
-        rest = " ".join(n.text.split("\n")[1:]) if norm_key(first_line(n.text)) == key else ""
+        text = ref_text(n.text) if norm_key(first_line(n.text)) != key else n.text
+        rest = " ".join(text.split("\n")[1:]) if norm_key(first_line(text)) == key else ""
         nums = re.findall(r"(?<![/\w])(\d+)(?![\w])", plain(rest))
         m = re.search(r"/\s*(\d+)", plain(rest))
         sh = split_shapes(n.text)[1]
@@ -2770,6 +3212,10 @@ class ClassBuilder:
         cc, ctor, out = self.defref_ctor(u, key)
         if cc is None:
             return self.emit_stub(u, ins, None)
+        merged = len(cc.forward_args) == 1 and len(ins) > 1
+        if merged:                                    # plus d'entrées que la définition : concaténées
+            x, meta, hint = self.combine(u, ins)          # (DenseNet : toutes les sorties précédentes)
+            ins = [(Value(x, meta, hint), ins[0][1])]
         vals = [v for v, _ in ins]
         hints = {v.hint.lower(): v for v in vals if v.hint}
         if len(cc.forward_args) == len(ins) and all(a in hints for a in cc.forward_args):
@@ -2797,7 +3243,7 @@ class ClassBuilder:
         todos = []
         feats = self.def_feats(cc, metas, todos)
         a = io_channels(self.g.nodes[u].text)[0]
-        if a is not None and feats and feats[0] and feats[0].isdigit() and int(feats[0]) != a:
+        if a is not None and feats and feats[0] and feats[0].isdigit() and int(feats[0]) != a and not merged:
             todos.append(f"le schéma indique {a} canaux d'entrée, le graphe en donne {feats[0]}")
         return self.emit_module(u, ins, ctor(True, feats), snake(cc.name), out(feats, metas[0]),
                                 call_args=call, todos=todos)
@@ -2821,7 +3267,8 @@ class ClassBuilder:
                 cs, ts = [], []
                 for c_uid in chain:
                     specs, reps, chans = self.node_specs(c_uid)
-                    c, m, t = self.run_specs(specs, reps, chans, m)
+                    c, m, t = self.run_specs(specs, reps, chans, m,
+                                             "stride" if c_uid in self.stride_nodes and mode == "seq" else None)
                     cs.extend(c)
                     ts.extend(t)
                 return cs, m, ts
@@ -2972,6 +3419,18 @@ class ClassBuilder:
         return r if r.isdigit() else self.hp(r)
 
     # .................................................................. définitions
+    def relative_to_c(self, v):
+        """Taille interne d'une définition dessinée pour un exemple qui garde la forme (C → C) : exprimée
+        par rapport à C (« C // 4 » d'un Bottleneck, « 4 * C » d'un MLP), pour suivre chaque bloc."""
+        c0 = getattr(self, "def_cout", None)
+        if not c0 or self.def_cin0 != c0 or v == c0 or not isinstance(v, int) or v < 2:
+            return v
+        if v % c0 == 0 and v // c0 <= 16:
+            return f"{v // c0} * C"
+        if c0 % v == 0 and c0 // v <= 64:
+            return f"C // {c0 // v}"
+        return v
+
     def collect_def_symbols(self):
         """Symboles des tailles (« Conv 3×3, C ») d'un cadre de définition -> paramètres obligatoires."""
         order = []
@@ -2998,6 +3457,13 @@ class ClassBuilder:
                     if sh:
                         self.def_cout = sh[1][0]
                         order.append("C")
+        self.def_cin0 = None                       # canaux d'entrée de l'exemple dessiné
+        for u in self.comp:
+            n = self.g.nodes[u]
+            if not self.g.ins(u) and (n.type in ("text", "point") or n.def_id == "Input"):
+                sh = split_shapes(n.text)[1]
+                if sh and len(sh[0]) > 1:
+                    self.def_cin0 = sh[0][0]
         self.def_auto_c = False
         if not order and any(io_channels(self.g.nodes[u].text)[1] is not None for u in self.def_users):
             self.def_auto_c = True
