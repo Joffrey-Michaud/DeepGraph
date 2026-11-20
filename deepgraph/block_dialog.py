@@ -208,8 +208,9 @@ class BlockDialog(QDialog):
         form.addRow("Copies empilées", self.stack)
 
         self.pytorch = QLineEdit(v.get("pytorch", ""))
-        self.pytorch.setPlaceholderText("facultatif, ex. nn.LazyConv2d(64, 3, padding=1)")
+        self.pytorch.setPlaceholderText("facultatif, ex. nn.Conv2d({in}, 64, 3, padding=1)")
         self.pytorch.setToolTip("Module PyTorch utilisé pour ce bloc par Fichier > Exporter en code PyTorch.\n"
+                                "{in} est remplacé par la taille d'entrée du bloc (canaux ou caractéristiques).\n"
                                 "Vide : DeepGraph le déduit du texte du bloc, ou laisse un TODO.")
         form.addRow("Code PyTorch", self.pytorch)
 

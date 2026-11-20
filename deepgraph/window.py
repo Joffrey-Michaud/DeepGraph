@@ -880,7 +880,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Code PyTorch", "Aucun réseau trouvé : le schéma doit contenir des blocs "
                                 "reliés par des flèches.")
             return
-        todo = (f"<p>{info['todo']} réglage(s) absent(s) du schéma, marqué(s) <b>TODO</b> dans le code.</p>"
+        todo = (f"<p>{info['todo']} point(s) à compléter ou à vérifier, marqué(s) <b>TODO</b> dans le code.</p>"
                 if info["todo"] else "<p>Aucun réglage manquant.</p>")
         box = QMessageBox(self)
         box.setWindowTitle("Code PyTorch")

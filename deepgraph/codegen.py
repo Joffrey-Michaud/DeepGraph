@@ -11,9 +11,10 @@ Le schéma est lu comme un graphe de flux de données :
   - flèches de couleur expliquées par une légende (flèche + texte) = opération sur la liaison
     (« Max Pool 2×2 », « Up-conv 2×2 », « copie + concaténation »).
 
-Le code produit utilise les modules « paresseux » (nn.LazyConv2d, nn.LazyLinear…) : le nombre de
-canaux d'entrée, que les schémas ne donnent presque jamais, est déduit au premier passage. Ce qui
-manque au schéma reçoit une valeur par défaut marquée « TODO ».
+Le code produit utilise des couches classiques (nn.Conv2d(in, out, …), nn.Linear(in, out)…) : la
+taille d'entrée de chaque couche est suivie le long du graphe (canaux, et taille de l'image pour un
+Flatten suivi d'une Linear). Ce qui manque au schéma, ou ne peut pas en être déduit, reçoit une valeur
+par défaut marquée « TODO ».
 
 Aucune dépendance à Qt ni à torch : le module lit le format complet (celui qu'écrit l'éditeur).
 """
@@ -761,9 +762,67 @@ HP_NOTES = {"d_model": "taille des vecteurs (embeddings, attention)", "num_heads
 @dataclass
 class Value:
     name: str
-    meta: tuple = (None, None)       # (genre, taille) genre ∈ img1d img2d img3d seq vec tokens
+    meta: tuple = (None, None)       # (genre, taille[, Spatial]) genre ∈ img1d img2d img3d seq vec tokens
     hint: str = ""                   # nom d'origine (q, k, v…) suivi le long des couches
     is_input: bool = False
+
+
+@dataclass(frozen=True)
+class Spatial:
+    """Taille spatiale d'une image suivie de couche en couche (pour un Flatten suivi d'une Linear)."""
+    dims: tuple                      # (H, W), (T,) ou (D, H, W)
+    why: frozenset = frozenset()     # raisons d'en douter : « entrée 64×64 » (supposée), « padding »
+
+
+def hw_of(meta):
+    return meta[2] if len(meta) > 2 else None
+
+
+def paren(e):
+    e = str(e)
+    return f"({e})" if re.search(r"[+\-]", e) else e
+
+
+def size_sum(feats):
+    """Canaux d'une concaténation : « 512 », « 512 » -> « 1024 » ; « C », « C » -> « 2 * C » ;
+    None si l'une des tailles est inconnue."""
+    if not feats or any(f is None for f in feats):
+        return None
+    feats = [str(f) for f in feats]
+    nums = [int(f) for f in feats if f.isdigit()]
+    syms = [f for f in feats if not f.isdigit()]
+    terms = [s if syms.count(s) == 1 else f"{syms.count(s)} * {paren(s)}" for s in dict.fromkeys(syms)]
+    if nums:
+        terms.append(str(sum(nums)))
+    return " + ".join(terms)
+
+
+def subst(expr, mapping):
+    """Taille exprimée avec les paramètres d'une classe -> avec les valeurs d'un appel (« C » -> « 128 »)."""
+    if expr is None:
+        return None
+    out = re.sub(r"\b[A-Za-z_]\w*\b",
+                 lambda m: paren(mapping[m.group(0)]) if mapping.get(m.group(0)) is not None else m.group(0),
+                 str(expr))
+    if re.fullmatch(r"[\d\s+*()]+", out) and "**" not in out:     # purement numérique : calculée
+        try:
+            return str(eval(out, {"__builtins__": {}}))  # noqa: S307 — chiffres, +, * et parenthèses
+        except (SyntaxError, TypeError, ValueError):
+            return out
+    return out
+
+
+def conv_dims(sp, k, s, pad, transposed=False, guessed=False):
+    """Taille spatiale après une convolution ou un pooling (None si elle ne peut pas être suivie)."""
+    if sp is None or not all(isinstance(v, int) for v in (k, s, pad)):
+        return None
+    if transposed:
+        dims = tuple((h - 1) * s - 2 * pad + k for h in sp.dims)
+    else:
+        dims = tuple((h + 2 * pad - k) // s + 1 for h in sp.dims)
+    if min(dims) < 1:
+        return None
+    return Spatial(dims, sp.why | ({"padding"} if guessed else frozenset()))
 
 
 @dataclass
@@ -776,6 +835,8 @@ class ClassCode:
     forward: list
     inputs: list = field(default_factory=list)    # (nom, genre, forme) pour l'essai
     top: bool = False
+    in_params: dict = field(default_factory=dict)  # paramètre de taille d'entrée -> indice de l'argument
+    out_meta: tuple = (None, None)                 # meta de la sortie (tailles en noms de paramètres)
 
 
 class Generator:
@@ -966,8 +1027,8 @@ class Generator:
                 + (f" « {self.file_title} »" if self.file_title else "") + ".",
                 "",
                 "Brouillon : la structure suit le schéma ; les réglages absents du schéma ont une valeur",
-                "par défaut marquée TODO. Les modules « Lazy » déduisent le nombre de canaux d'entrée au",
-                "premier passage : faire un passage d'essai avant de créer l'optimiseur.",
+                "par défaut marquée TODO. La taille d'entrée de chaque couche est déduite de la couche",
+                "précédente : changer une taille de sortie demande de changer aussi l'entrée qui suit.",
                 "",
                 "Conventions : convolutions avec padding « same » (k // 2) ; pooling sans pas indiqué :",
                 "pas 2 pour un noyau 2×2, sinon pas 1 ; entrées d'une attention, de gauche à droite : V, K, Q."]
@@ -1058,9 +1119,9 @@ class PositionEmbedding(nn.Module):
 class PatchEmbedding(nn.Module):
     """Découpe l'image en patchs p×p et projette chacun : (B, C, H, W) -> (B, N, d_model)."""
 
-    def __init__(self, d_model, patch_size):
+    def __init__(self, in_channels, d_model, patch_size):
         super().__init__()
-        self.proj = nn.LazyConv2d(d_model, patch_size, stride=patch_size)
+        self.proj = nn.Conv2d(in_channels, d_model, patch_size, stride=patch_size)
 
     def forward(self, x):
         return self.proj(x).flatten(2).transpose(1, 2)
@@ -1098,6 +1159,83 @@ class ClassBuilder:
         self.forward_args = []
         self.shared = {}                          # uid -> ensemble de nœuds qui partagent un module
         self.shared_attr = {}                     # id(ensemble) -> nom de l'attribut
+        self.in_syms = {}                         # in_channels… -> (défaut, lu dans le schéma, libellé, indice)
+        self.out_meta = (None, None)
+
+    # ---------------------------------------------------------------- tailles d'entrée
+    def in_size(self, feat, todos, kind=None, what="le nombre de canaux d'entrée"):
+        """Taille d'entrée d'une couche, suivie depuis l'entrée du réseau ; inconnue -> défaut + TODO."""
+        if feat is not None:
+            return str(feat)
+        if kind == "seq":
+            return self.hp("d_model")
+        todos.append(f"préciser {what}, que le schéma ne permet pas de déduire")
+        return "64"
+
+    def flat_size(self, feat, sp, todos):
+        """Taille après Flatten d'une image (C × H × W), avec un TODO si elle repose sur une supposition."""
+        if feat is None or sp is None:
+            return None
+        if all(d == 1 for d in sp.dims):
+            return str(feat)
+        expr = " * ".join([paren(feat)] + [str(d) for d in sp.dims])
+        why = []
+        for w in sorted(sp.why):
+            if w.startswith("entrée"):
+                why.append(f"une {w} supposée (celle de l'essai)")
+            elif w == "padding":
+                why.append("un padding supposé (« same » pour les convolutions)")
+        if why:
+            todos.append(f"{expr} calculé avec {' et '.join(why)} : à vérifier")
+        return expr
+
+    def shape_meta(self, meta, out):
+        """Ligne de formes du schéma (« → 64×56×56 ») : taille de sortie exacte."""
+        kind, feat = meta[0], meta[1]
+        if kind and kind.startswith("img") and len(out) > 1:
+            return (kind, feat if feat is not None else str(out[0]), Spatial(tuple(out[1:])))
+        if kind in ("vec", "seq") and out:
+            return (kind, feat if feat is not None else str(out[-1]))
+        return meta
+
+    def input_dims(self, u, n, kind):
+        """Entrée u : (canaux ou taille, dimensions spatiales, canaux lus dans le schéma ?, dimensions lues ?)."""
+        t = plain(n.hint + " " + n.text)
+        if kind == "vec":
+            nums = [x for x in re.findall(r"\b\d+\b", re.sub(r"\(.*?\)", "", t)) if int(x) >= 2]
+            return (int(nums[0]) if nums else 64), None, bool(nums), False
+        d = int(kind[3])
+        m = KERNEL.search(t)
+        dims = [int(x) for x in re.findall(r"\d+", m.group(0))] if m and "patch" not in t.lower() else []
+        word = 3 if re.search(r"\brgb\b|\bcouleurs?\b|\bcolou?r\b", t, re.I) else \
+            1 if re.search(r"\bgr[ia]y\w*|\bgris\b|\bniveaux? de gris|\bmono", t, re.I) else None
+        if len(dims) == 3:                             # H×W×C (ou C×H×W)
+            c = dims[2] if dims[2] <= 4 else dims[0]
+            hw = [x for x in dims if x != c][:2] or dims[:2]
+            return c, ((hw[0], hw[-1]) if d == 2 else (hw[0],) * d), True, True
+        res = self.residual_channels(u)                # entrée additionnée à la sortie d'une convolution
+        c = word or res or (64 if res == 0 else 3)     # 64 : canaux par défaut d'une convolution
+        if len(dims) == 2:
+            return c, ((dims[0], dims[1]) if d == 2 else (dims[0],) * d), bool(word or res), True
+        return c, ((128,) if d == 1 else (64,) * d), bool(word or res), False
+
+    def input_size(self, u, n, nm, meta, idx, mandatory):
+        """Entrée image ou vecteur : sa taille devient un paramètre (in_channels, in_features)."""
+        kind = meta[0]
+        img = bool(kind and kind.startswith("img"))
+        if not img and kind != "vec":
+            return meta
+        what = "channels" if img else "features"
+        sym = f"in_{what}" if f"in_{what}" not in self.in_syms else f"{ident(nm, 'x')}_{what}"
+        if mandatory:
+            self.in_syms[sym] = (None, True, nm, idx)
+            return (kind, sym, hw_of(meta))
+        c, hw, c_text, hw_text = self.input_dims(u, n, kind)
+        self.in_syms[sym] = (c, c_text, label_line(n.hint or n.text) or nm, idx)
+        sp = None
+        if img:
+            sp = Spatial(tuple(hw), frozenset() if hw_text else frozenset({f"entrée {'×'.join(map(str, hw))}"}))
+        return (kind, sym, sp)
 
     # ---------------------------------------------------------------- noms
     def hp(self, name, default=None):
@@ -1164,21 +1302,26 @@ class ClassBuilder:
         inputs = [u for u in order if self.is_source(u)]
         inputs.sort(key=lambda u: self.input_sort_key(u))
         names = {}
-        for u in inputs:
+        for idx, u in enumerate(inputs):
             n = g.nodes[u]
             if u in self.ext_inputs:
-                nm, meta, hint = self.ext_inputs[u][:3]
+                ext = self.ext_inputs[u]
+                nm, meta, hint = ext[:3]
                 nm = self.var(nm)
+                if (ext[3] if len(ext) > 3 else 0) == 0 and self.kind == "layer":
+                    meta = self.input_size(u, n, nm, meta, idx, mandatory=True)   # bloc répété : paramètre
                 for tok in re.findall(r"[A-Za-z_]\w*", str(meta[1] or "")):
-                    self.hp(tok)
+                    if tok not in self.in_syms:
+                        self.hp(tok)
             else:
                 nm = self.var(ident(n.hint or n.text, "x"))
                 meta, hint = self.input_meta(u), ident(n.hint or n.text, "")
+                meta = self.input_size(u, n, nm, meta, idx, mandatory=self.kind == "def")
             names[u] = nm
             self.values[(u, 0)] = Value(nm, meta, hint, is_input=True)
             self.forward_args.append(nm)
             if u not in self.ext_inputs:
-                self.inputs_spec.append((nm, meta[0], self.example_shape(u, n, meta)))
+                self.inputs_spec.append((nm, meta[0], (u, n, meta)))
         returns = []
         for u in order:
             if u in names or self.g.nodes[u].data.get("absorbed"):
@@ -1199,18 +1342,32 @@ class ClassBuilder:
         if not returns:
             returns = [(v, None) for k, v in self.values.items() if v.is_input][:1]
         self.finish_returns(returns)
-        params = dict(self.params)
+        self.inputs_spec = [(nm, kind, self.example_shape(*a)) for nm, kind, a in self.inputs_spec]
+        # tailles d'entrée (in_channels…) : paramètres en tête, s'ils servent
+        used = "\n".join(self.init)
+        in_params, in_idx = {}, {}
+        for sym, (default, from_text, label, idx) in self.in_syms.items():
+            if not re.search(rf"\b{sym}\b", used):
+                continue
+            in_params[sym] = default
+            in_idx[sym] = idx
+            if default is not None and not from_text:
+                what = "canaux" if sym.endswith("channels") else "taille"
+                self.init.insert(0, f"# TODO : {what} de « {label} », que le schéma n'indique pas "
+                                    f"({sym}={default} par défaut)")
+        params = dict(in_params)
         if self.kind == "def":
-            ordered = {s: None for s in self.def_symbol_order if s in self.def_symbols}
+            params.update({s: None for s in self.def_symbol_order if s in self.def_symbols})
             if self.strided:
-                ordered["stride"] = 1
-            ordered.update({k: v for k, v in params.items() if k not in ordered})
-            params = ordered
+                params["stride"] = 1
+        params.update({k: v for k, v in self.params.items() if k not in params})
         cc = ClassCode(self.name, self.doc, params, self.init, self.forward_args, self.fwd,
-                       self.inputs_spec)
+                       self.inputs_spec, in_params=in_idx, out_meta=self.out_meta)
         return cc
 
     def finish_returns(self, returns):
+        if returns:
+            self.out_meta = returns[0][0].meta
         seen, vals, labels = set(), [], []
         for v, n in returns:
             if id(v) in seen:
@@ -1443,36 +1600,22 @@ class ClassBuilder:
             sp = self.node_specs(w) if g.nodes[w].type in ("block", "edgeop") else None
             if sp and sp[0][0].kind == "conv":
                 out = sp[0][0].p.get("out") or sp[2]
-                return out if isinstance(out, int) else 64
+                return out if isinstance(out, int) else 0          # 0 : addition, canaux non indiqués
             todo += [e.dst for e in g.outs(w)]
         return None
 
     def example_shape(self, u, n, meta):
+        """Forme de l'entrée de l'essai (appelée en fin de construction : réglages connus)."""
         kind = meta[0]
-        t = plain(n.hint + " " + n.text)
-        res = self.residual_channels(u) if kind and kind.startswith("img") else None
-        dims = [int(x) for x in re.findall(r"\d+", KERNEL.search(t).group(0))] if KERNEL.search(t) and \
-            "patch" not in t.lower() else []
         if kind == "tokens":
             return "(1, 16)"
-        if kind and kind.startswith("img"):
-            d = int(kind[3])
-            sp = 64
-            if len(dims) == 3:                         # H×W×C (ou C×H×W)
-                c = dims[2] if dims[2] <= 4 else dims[0]
-                hw = [x for x in dims if x != c][:2] or dims[:2]
-                return f"(1, {c}, {hw[0]}, {hw[-1]})" if d == 2 else f"(1, {c}" + f", {hw[0]}" * d + ")"
-            if len(dims) == 2:
-                return f"(1, 3, {dims[0]}, {dims[1]})" if d == 2 else "(1, 3" + f", {dims[0]}" * d + ")"
-            c = res or 3
-            if d == 1:
-                return f"(1, {c}, 128)"
-            return f"(1, {c}" + f", {sp}" * d + ")"
         if kind == "seq":
-            dm = self.params.get("d_model", 64)
-            return f"(1, 16, {dm})"
-        nums = [x for x in re.findall(r"\b\d+\b", re.sub(r"\(.*?\)", "", t)) if int(x) >= 2]
-        return f"(1, {nums[0] if nums else 64})"
+            feat = meta[1] if meta[1] is not None else "d_model"
+            return f"(1, 16, {self.params.get(feat, feat if str(feat).isdigit() else 64)})"
+        c, hw, _, _ = self.input_dims(u, n, kind if kind and kind.startswith("img") else "vec")
+        if kind and kind.startswith("img"):
+            return "(" + ", ".join(map(str, (1, c) + tuple(hw))) + ")"
+        return f"(1, {c})"
 
     # ---------------------------------------------------------------- groupes
     def collapse_groups(self):
@@ -1736,7 +1879,7 @@ class ClassBuilder:
         specs, reps, chans = self.node_specs(u)
         s0 = specs[0]
         if s0.kind == "user":
-            return self.emit_module(u, ins, s0.p["expr"], ident(n.text, "bloc"), ins[0][0].meta)
+            return self.emit_user(u, ins, s0.p["expr"])
         if s0.kind == "defref":
             return self.emit_defref(u, ins, s0.p["key"])
         handler = getattr(self, "emit_" + s0.kind, None)
@@ -1793,7 +1936,7 @@ class ClassBuilder:
         if not skips:
             line += "  # TODO : plusieurs entrées, concaténées par défaut"
         self.fwd.append(line)
-        return nm, (kind, None), ""
+        return nm, (kind, size_sum([v.meta[1] for v, _ in ordered]), hw_of(ordered[0][0].meta)), ""
 
     def emit_simple(self, u, ins, specs, reps, chans):
         g = self.g
@@ -1812,14 +1955,7 @@ class ClassBuilder:
             chans = dp[2] if dp else None
             if chans is None and dp and dp[0][0].p.get("out") is not None:
                 chans = dp[0][0].p.get("out")
-        ctors, todos = [], []
-        for _ in range(max(1, reps)):
-            for i, s in enumerate(specs):
-                c, meta, t = self.layer(s, meta, chans, stride_param, last and i == last_i)
-                stride_param = None
-                if c:
-                    ctors.extend(c)
-                todos.extend(t)
+        ctors, meta, todos = self.run_specs(specs, reps, chans, meta, stride_param, last, last_i)
         todos = list(dict.fromkeys(todos))
         if not ctors:
             return self.passthrough(u, ins, x, meta, hint, todos)
@@ -1829,6 +1965,21 @@ class ClassBuilder:
         fake_ins = [(Value(x, meta, hint), ins[0][1])] if len(ins) > 1 else ins
         out = self.out_value(u, fake_ins if len(ins) == 1 else [], meta, hint=hint)
         self.fwd.append(f"{out.name} = self.{att}({x}){self.comment(n)}")
+
+    def run_specs(self, specs, reps, chans, meta, stride_param=None, last=False, last_i=None):
+        """Couches d'un bloc, la taille suivie de l'une à l'autre -> (constructeurs, meta, todos)."""
+        ctors, todos = [], []
+        for _ in range(max(1, reps)):
+            for i, s in enumerate(specs):
+                c, meta, t = self.layer(s, meta, chans, stride_param, last and i == last_i)
+                if s.kind in ("conv", "pool"):
+                    stride_param = None
+                ctors.extend(c)
+                todos.extend(t)
+        sh = specs[0].p.get("_shape") if specs else None
+        if sh:
+            meta = self.shape_meta(meta, sh[1])
+        return ctors, meta, todos
 
     def passthrough(self, u, ins, x, meta, hint, todos):
         n = self.g.nodes[u]
@@ -1916,13 +2067,14 @@ class ClassBuilder:
         return bool(seen) or not g.outs(u)
 
     def layer(self, s, meta, chans, stride_param=None, last=False):
-        """Spec -> ([constructeurs], meta de sortie, [todos])."""
-        kind, feat = meta
+        """Spec -> ([constructeurs], meta de sortie, [todos]) ; meta = (genre, taille[, Spatial])."""
+        kind, feat, sp = meta[0], meta[1], hw_of(meta)
         todos = []
         k = s.kind
         p = s.p
         img = kind if kind and kind.startswith("img") else None
         dim = int(img[3]) if img else 2
+        sh = p.get("_shape")
 
         def out_size(fallback=64, what="la taille de sortie"):
             v = p.get("out")
@@ -1940,37 +2092,50 @@ class ClassBuilder:
                 return str(fallback)
             return e
 
+        def channels_in():
+            """Canaux d'entrée : suivis le long du graphe, sinon lus dans la ligne de formes."""
+            shown = sh[0][0] if sh and len(sh[0]) > 1 else None
+            if feat is not None and shown is not None and str(feat).isdigit() and int(feat) != shown:
+                todos.append(f"le schéma indique {shown} canaux d'entrée")
+            return self.in_size(feat if feat is not None else shown, todos)
+
+        def exact_pad(ks, st):
+            if sh and len(sh[0]) > 1 and len(sh[1]) > 1 and isinstance(st, int) and isinstance(ks, int):
+                return max(0, -(-((sh[1][-1] - 1) * st + ks - sh[0][-1]) // 2))
+            return None
+
         if k == "conv":
             d = p.get("dim") or dim
             ks = p.get("k") or (2 if p.get("transposed") else 3)
             out = out_size(64, "le nombre de canaux")
             st = p.get("stride") or (ks if p.get("transposed") else 1)
             stv = stride_param or (str(st) if st != 1 else None)
+            cin = channels_in()
+            run_st = st if not stride_param else None          # pas en paramètre : taille non suivie
             if p.get("transposed"):
-                c = f"nn.LazyConvTranspose{d}d({out}, kernel_size={ks}" + (f", stride={stv}" if stv else "") + ")"
+                c = f"nn.ConvTranspose{d}d({cin}, {out}, kernel_size={ks}" + (f", stride={stv}" if stv else "") + ")"
+                nsp = conv_dims(sp, ks, run_st, 0, transposed=True)
             else:
-                sh = p.get("_shape")
-                if sh and len(sh[0]) > 1 and len(sh[1]) > 1 and isinstance(st, int):
-                    pad = max(0, -(-((sh[1][-1] - 1) * st + ks - sh[0][-1]) // 2))
-                else:
+                pad = exact_pad(ks, st)
+                guessed = pad is None and isinstance(ks, int) and ks > 1
+                if pad is None:
                     pad = max(0, (ks - st + 1) // 2) if isinstance(st, int) else ks // 2
                 args = [f"kernel_size={ks}"]
                 if stv:
                     args.append(f"stride={stv}")
                 if pad:
                     args.append(f"padding={pad}")
-                cin = str(sh[0][0]) if sh else (feat if isinstance(feat, str) and feat.isdigit() else None)
-                if p.get("depthwise") and cin:
+                if p.get("depthwise"):
                     c = f"nn.Conv{d}d({cin}, {cin}, {', '.join(args)}, groups={cin})"
                     out = cin
                 else:
-                    c = f"nn.LazyConv{d}d({', '.join([out] + args)})"
-                    if p.get("depthwise"):
-                        todos.append("convolution depthwise : ajouter groups=nombre de canaux d'entrée")
-            pre = []
+                    c = f"nn.Conv{d}d({', '.join([cin, out] + args)})"
+                nsp = conv_dims(sp, ks, run_st, pad, guessed=guessed)
+            if sh and len(sh[1]) > 1:
+                nsp = Spatial(tuple(sh[1][1:]))
             if kind == "seq":
                 todos.append("convolution sur une séquence : passer en (B, C, T) avec x.transpose(1, 2)")
-            return pre + [c], (f"img{d}d", out), todos
+            return [c], (f"img{d}d", out, nsp), todos
         if k == "pool":
             ks = p.get("k") or 2
             st = p.get("stride") or (2 if ks == 2 else 1)
@@ -1978,31 +2143,41 @@ class ClassBuilder:
             args = [f"kernel_size={ks}"]
             stv = stride_param or str(st)
             args.append(f"stride={stv}")
-            if st == 1 and not stride_param and ks // 2:
-                args.append(f"padding={ks // 2}")
-            return [f"nn.{op}Pool{dim}d({', '.join(args)})"], (img or "img2d", feat), todos
+            pad = exact_pad(ks, st)
+            guessed = pad is None and isinstance(ks, int) and isinstance(st, int) and ks > st
+            if pad is None:
+                pad = ks // 2 if st == 1 and not stride_param else 0
+            if pad:
+                args.append(f"padding={pad}")
+            nsp = conv_dims(sp, ks, st if not stride_param else None, pad, guessed=guessed)
+            if sh and len(sh[1]) > 1:
+                nsp = Spatial(tuple(sh[1][1:]))
+            return [f"nn.{op}Pool{dim}d({', '.join(args)})"], (img or "img2d", feat, nsp), todos
         if k == "gpool":
             op = "Max" if p.get("op") == "max" else "Avg"
             return [f"nn.Adaptive{op}Pool{dim}d(1)", "nn.Flatten()"], ("vec", feat), todos
         if k == "upsample":
             sc = p.get("out") if isinstance(p.get("out"), int) and p.get("out") <= 8 else 2
-            return [f"nn.Upsample(scale_factor={sc})"], meta, todos
+            nsp = Spatial(tuple(h * sc for h in sp.dims), sp.why) if sp else None
+            return [f"nn.Upsample(scale_factor={sc})"], (kind, feat, nsp), todos
         if k == "norm":
             op = p.get("op") or ("batch" if img else "layer")
             if op == "batch":
                 if kind == "seq":
                     todos.append("BatchNorm sur une séquence : nn.BatchNorm1d attend (B, C, T)")
                 bd = dim if img else 1
-                return [f"nn.LazyBatchNorm{bd}d()"], meta, todos
+                return [f"nn.BatchNorm{bd}d({channels_in()})"], meta, todos
             if op == "instance":
-                return [f"nn.LazyInstanceNorm{dim}d()"], meta, todos
+                return [f"nn.InstanceNorm{dim}d({channels_in()})"], meta, todos
             if op == "lrn":
                 return ["nn.LocalResponseNorm(5)"], meta, todos
-            sh = p.get("_shape")
-            f = (str(sh[1][-1] if kind == "seq" or len(sh[1]) <= 2 else sh[1][0]) if sh else None) \
-                or feat or self.hp("d_model")
-            if feat is None and not sh:
-                todos.append("taille normalisée inconnue (d_model par défaut)")
+            if img:
+                f = channels_in()
+            else:
+                f = (str(sh[1][-1]) if sh else None) if feat is None else str(feat)
+                f = f or self.hp("d_model")
+                if feat is None and not sh:
+                    todos.append("taille normalisée inconnue (d_model par défaut)")
             if op == "group":
                 return [f"nn.GroupNorm(32, {f})"], meta, todos
             if op == "rms":
@@ -2023,34 +2198,44 @@ class ClassBuilder:
         if k == "dropout":
             return [f"nn.Dropout({p.get('p', 0.5)})"], meta, todos
         if k == "flatten":
-            return ["nn.Flatten()"], ("vec", None), todos
-        if k == "linear":
+            return ["nn.Flatten()"], ("vec", self.flat_size(feat, sp, todos) if img else
+                                      (feat if kind == "vec" else None)), todos
+        if k in ("linear", "head"):
             pre = []
             if img:
                 pre = ["nn.Flatten()"]
+                if sh and len(sh[0]) == 1:
+                    fin = str(sh[0][0])
+                elif sh and len(sh[0]) > 1:
+                    fin = " * ".join(map(str, sh[0]))
+                else:
+                    fin = self.flat_size(feat, sp, todos)
                 kind = "vec"
+            else:
+                fin = feat if feat is not None else (str(sh[0][-1]) if sh else None)
+            fin = self.in_size(fin, todos, kind, "la taille d'entrée")
+            if k == "head":
+                nm = "vocab_size" if "vocab_size" in self.params else "num_classes"
+                if kind == "seq":
+                    todos.append("tête appliquée à chaque jeton : prendre x[:, 0] (jeton de classe) ou x.mean(1)")
+                return pre + [f"nn.Linear({fin}, {self.hp(nm)})"], (kind, nm), todos
             if p.get("proj") and p.get("out") is None:
                 out = self.hp("d_model")
             else:
                 out = out_size(128, "la taille de sortie")
-            return pre + [f"nn.LazyLinear({out})"], (kind or "vec", out), todos
+            return pre + [f"nn.Linear({fin}, {out})"], (kind or "vec", out), todos
         if k == "embedding":
             d = self.size_expr(p.get("out"), "d_model")
             return [f"nn.Embedding({self.hp('vocab_size')}, {d})"], ("seq", d), todos
         if k == "ff" or k == "mlp":
             d = feat or self.hp("d_model")
             act = "nn.ReLU()" if k == "ff" else "nn.GELU()"
-            return [f"nn.Sequential(nn.LazyLinear({self.hp('d_ff')}), {act}, nn.Linear({self.hp('d_ff')}, {d}))"], \
-                (kind, d), todos
-        if k == "head":
-            nm = "vocab_size" if "vocab_size" in self.params else "num_classes"
-            if kind == "seq":
-                todos.append("tête appliquée à chaque jeton : prendre x[:, 0] (jeton de classe) ou x.mean(1)")
-            return [f"nn.LazyLinear({self.hp(nm)})"], (kind, nm), todos
+            dff = self.hp("d_ff")
+            return [f"nn.Sequential(nn.Linear({d}, {dff}), {act}, nn.Linear({dff}, {d}))"], (kind, d), todos
         if k == "patch":
             self.gen.helper("PatchEmbedding")
             d = self.hp("d_model")
-            return [f"PatchEmbedding({d}, {self.hp('patch_size')})"], ("seq", d), todos
+            return [f"PatchEmbedding({channels_in()}, {d}, {self.hp('patch_size')})"], ("seq", d), todos
         if k == "posenc":
             d = feat or self.hp("d_model")
             if p.get("learned"):
@@ -2069,9 +2254,9 @@ class ClassBuilder:
         todos.append(f"bloc « {k} » non traduit")
         return [], meta, todos
 
-    def emit_module(self, u, ins, ctor, base, meta, call_args=None):
+    def emit_module(self, u, ins, ctor, base, meta, call_args=None, todos=None):
         n = self.g.nodes[u]
-        att = self.module_attr(u, base, ctor, n, [])
+        att = self.module_attr(u, base, ctor, n, todos or [])
         args = call_args or [v.name for v, _ in ins]
         out = self.out_value(u, ins if len(ins) == 1 else [], meta)
         self.fwd.append(f"{out.name} = self.{att}({', '.join(args)}){self.comment(n)}")
@@ -2101,20 +2286,30 @@ class ClassBuilder:
         todo = ""
         for p_uid in n.data.get("params", []):         # paramètre du modèle posé à côté de l'opérateur
             names = self.param_operand(p_uid, sym, ins, names)
+        if sym in ("plus", "times", "dot", "minus"):          # taille : celle d'une entrée calculée
+            known = [v for v, _ in ins if v.meta[1] is not None]
+            pref = [v for v in known if not v.is_input] or known
+            if pref:
+                meta = pref[0].meta
         if sym == "plus":
             expr = " + ".join(names)
-            if self.kind == "def" and self.strided and len(ins) == 2:
+            if self.kind == "def" and len(ins) == 2:          # bloc résiduel : raccourci si la forme change
                 inp = [v for v, _ in ins if v.is_input]
-                if inp:
+                oth = [v for v, _ in ins if not v.is_input]
+                kd = inp[0].meta[0] if inp else None
+                cin, cout = (inp[0].meta[1], oth[0].meta[1]) if inp and oth else (None, None)
+                conds = (["stride == 1"] if self.strided else []) + \
+                    ([f"{cin} == {paren(cout)}"] if cin and cout and str(cin) != str(cout) else [])
+                if kd and kd.startswith("img") and cin and cout and conds:
+                    d = kd[3]
                     att = self.attr("shortcut")
-                    width = "C" if "C" in self.def_symbols else None
-                    if width:
-                        self.init.append(f"self.{att} = nn.Identity() if stride == 1 else nn.Sequential(")
-                        self.init.append(f"    nn.LazyConv2d({width}, kernel_size=1, stride=stride, bias=False),")
-                        self.init.append("    nn.LazyBatchNorm2d(),")
-                        self.init.append(")  # raccourci : Conv 1×1 quand la résolution change "
-                                         "(TODO : aussi si le nombre de canaux change)")
-                        expr = " + ".join(f"self.{att}({v.name})" if v.is_input else v.name for v, _ in ins)
+                    st = ", stride=stride" if self.strided else ""
+                    self.init.append(f"self.{att} = nn.Identity() if {' and '.join(conds)} else nn.Sequential(")
+                    self.init.append(f"    nn.Conv{d}d({cin}, {cout}, kernel_size=1{st}, bias=False),")
+                    self.init.append(f"    nn.BatchNorm{d}d({cout}),")
+                    self.init.append(")  # raccourci : Conv 1×1 quand la forme change")
+                    expr = " + ".join(f"self.{att}({v.name})" if v.is_input else v.name for v, _ in ins)
+                    meta = oth[0].meta
         elif sym in ("times", "dot"):
             expr = " * ".join(names)
         elif sym == "minus":
@@ -2126,7 +2321,7 @@ class ClassBuilder:
             tokens = seq_params and kind == "seq"           # jeton ajouté : axe des positions
             dim = 1 if (kind and kind.startswith("img")) or tokens else -1
             expr = f"torch.cat([{', '.join(names)}], dim={dim})"
-            meta = (kind, meta[1] if tokens else None)
+            meta = (kind, meta[1] if tokens else size_sum([v.meta[1] for v, _ in ins]), hw_of(meta))
         else:
             expr = names[0]
             todo = f"  # TODO : opérateur « {sym} »"
@@ -2258,7 +2453,7 @@ class ClassBuilder:
             return
         kind = ins[0][0].meta[0]
         dim = 1 if kind and kind.startswith("img") else -1
-        out = self.out_value(u, [], (kind, None))
+        out = self.out_value(u, [], (kind, size_sum([v.meta[1] for v, _ in ins]), hw_of(ins[0][0].meta)))
         self.fwd.append(f"{out.name} = torch.cat([{', '.join(v.name for v, _ in ins)}], dim={dim})"
                         + self.comment(self.g.nodes[u]))
 
@@ -2277,19 +2472,31 @@ class ClassBuilder:
         v = ins[0][0]
         self.values[(u, 0)] = v
 
+    def emit_user(self, u, ins, expr):
+        """Bloc personnel (champ « Code PyTorch ») : « {in} » y est remplacé par la taille d'entrée."""
+        v0, todos = ins[0][0], []
+        meta = v0.meta
+        if "{in}" in expr:
+            expr = expr.replace("{in}", self.in_size(meta[1], todos, meta[0]))
+        outs = re.findall(r"nn\.(?:Conv\w*|Linear)\(\s*[^,()]+,\s*([^,()=]+)[,)]", expr) or \
+            re.findall(r"nn\.Lazy(?:Conv\w*|Linear)\(\s*([^,()=]+)[,)]", expr)
+        if outs:                                     # dernière couche à taille : ses canaux de sortie
+            meta = (meta[0], outs[-1].strip())
+        return self.emit_module(u, ins, expr, ident(self.g.nodes[u].text, "bloc"), meta, todos=todos)
+
     def emit_stub(self, u, ins, s):
         cname = self.gen.stub_class(self.g.nodes[u].text, len(ins))
         return self.emit_module(u, ins, f"{cname}()", snake(cname), ins[0][0].meta)
 
     def defref_ctor(self, u, key):
-        """Bloc qui porte le titre d'une définition -> (classe, constructeur(avec_pas)).
+        """Bloc qui porte le titre d'une définition -> (classe, ctor(avec_pas, tailles), sortie(tailles, meta)).
 
         « Basic Block\n128, /2 » : les nombres remplissent les tailles symboliques de la définition (C),
-        « /2 » son paramètre stride."""
+        « /2 » son paramètre stride ; ses tailles d'entrée (in_channels) sont celles des valeurs reçues."""
         n = self.g.nodes[u]
         cc = self.gen.def_class(key)
         if cc is None:
-            return None, None
+            return None, None, None
         rest = " ".join(n.text.split("\n")[1:]) if norm_key(first_line(n.text)) == key else ""
         nums = re.findall(r"(?<![/\w])(\d+)(?![\w])", plain(rest))
         m = re.search(r"/\s*(\d+)", plain(rest))
@@ -2298,25 +2505,65 @@ class ClassBuilder:
             nums = [str(sh[1][0])]
             if len(sh[0]) > 1 and sh[0][-1] > sh[1][-1]:
                 m = re.search(r"(\d+)", str(sh[0][-1] // sh[1][-1]))
-        args = []
-        for i, p in enumerate([p for p, d in cc.params.items() if d is None]):
-            args.append(nums[i] if i < len(nums) else self.hp(p))
-        args += [f"{p}={self.hp(p, d)}" for p, d in cc.params.items() if d is not None and p != "stride"]
         stride = m.group(1) if m and "stride" in cc.params else None
 
-        def ctor(with_stride=True):
+        def call(feats):
+            args, mapping, i = [], {}, 0
+            for p, d in cc.params.items():
+                if d is not None:
+                    continue
+                if p in cc.in_params:
+                    j = cc.in_params[p]
+                    val = feats[j] if j < len(feats) and feats[j] is not None else "64"
+                else:
+                    val = nums[i] if i < len(nums) else self.hp(p)
+                    i += 1
+                args.append(str(val))
+                mapping[p] = str(val)
+            for p, d in cc.params.items():
+                if d is not None and p != "stride":
+                    args.append(f"{p}={self.hp(p, d)}")
+                    mapping[p] = p
+            return args, mapping
+
+        def ctor(with_stride=True, feats=()):
+            args = call(list(feats))[0]
             return f"{cc.name}({', '.join(args + ([f'stride={stride}'] if stride and with_stride else []))})"
-        return cc, ctor
+
+        def out(feats, meta_in, with_stride=True):
+            mapping = call(list(feats))[1]
+            kind = cc.out_meta[0] or meta_in[0]
+            feat = subst(cc.out_meta[1], mapping)
+            sp = hw_of(meta_in) if kind and kind.startswith("img") else None
+            if sp and sh and len(sh[1]) > 1:
+                sp = Spatial(tuple(sh[1][1:]))
+            elif sp and stride and with_stride:
+                sp = Spatial(tuple(-(-h // int(stride)) for h in sp.dims), sp.why | {"padding"})
+            return (kind, feat, sp)
+        return cc, ctor, out
+
+    def def_feats(self, cc, metas, todos):
+        """Tailles d'entrée passées à une définition (in_channels…), dans l'ordre de ses arguments."""
+        feats = [None] * len(metas)
+        for j in cc.in_params.values():
+            if j < len(metas):
+                feats[j] = self.in_size(metas[j][1], todos, metas[j][0])
+        return feats
 
     def emit_defref(self, u, ins, key):
-        cc, ctor = self.defref_ctor(u, key)
+        cc, ctor, out = self.defref_ctor(u, key)
         if cc is None:
             return self.emit_stub(u, ins, None)
         call = [v.name for v, _ in ins]
-        hints = {v.hint.lower(): v.name for v, _ in ins if v.hint}
+        metas = [v.meta for v, _ in ins]
+        hints = {v.hint.lower(): v for v, _ in ins if v.hint}
         if len(cc.forward_args) == len(ins) and all(a in hints for a in cc.forward_args):
-            call = [f"{a}={hints[a]}" for a in cc.forward_args]       # q=…, k=…, v=…
-        return self.emit_module(u, ins, ctor(), snake(cc.name), ins[0][0].meta, call_args=call)
+            call = [f"{a}={hints[a].name}" for a in cc.forward_args]       # q=…, k=…, v=…
+            metas = [hints[a].meta for a in cc.forward_args]
+        todos = []
+        feats = self.def_feats(cc, metas, todos)
+        return self.emit_module(u, ins, ctor(True, feats), snake(cc.name), out(feats, ins[0][0].meta),
+                                call_args=call, todos=todos)
 
     # .................................................................. cadres
     def emit_sub(self, u, ins, s=None):
@@ -2326,26 +2573,44 @@ class ClassBuilder:
         if mode in ("seq", "single"):
             chain = n.data["chain"]
             x, meta, hint = self.combine(u, ins) if ins else ("x", (None, None), "")
-            ctors, todos = [], []
-            for c_uid in chain:
-                sp = self.node_specs(c_uid)
-                if mode == "single" and (not sp or sp[0][0].kind in ("defref", "stub", "user")
-                                         or self.role(c_uid) != "layer"):
-                    return self.emit_repeat_single(u, ins, c_uid, sp[0][0] if sp and self.role(c_uid) == "layer"
-                                                   else Spec("stub"))
-                specs, reps, chans = sp
-                stride_param = None
-                last = False
-                for _ in range(max(1, reps)):
-                    for sp_ in specs:
-                        c, meta, t = self.layer(sp_, meta, chans, stride_param, last)
-                        ctors.extend(c)
-                        todos.extend(t)
             if mode == "single":
+                for c_uid in chain:
+                    sp = self.node_specs(c_uid)
+                    if not sp or sp[0][0].kind in ("defref", "stub", "user") or self.role(c_uid) != "layer":
+                        return self.emit_repeat_single(u, ins, c_uid, sp[0][0] if sp and self.role(c_uid) == "layer"
+                                                       else Spec("stub"))
+
+            def one_pass(m):
+                cs, ts = [], []
+                for c_uid in chain:
+                    specs, reps, chans = self.node_specs(c_uid)
+                    c, m, t = self.run_specs(specs, reps, chans, m)
+                    cs.extend(c)
+                    ts.extend(t)
+                return cs, m, ts
+
+            ctors, meta1, todos = one_pass(meta)
+            if mode == "single":                          # « 3× Conv 3×3, 256 » : la 1re copie reçoit l'entrée
                 r = n.data["repeat"]
-                inner = ctors[0] if len(ctors) == 1 else "nn.Sequential(" + ", ".join(ctors) + ")"
-                ctor = f"nn.Sequential(*[{inner} for _ in range({self.rep_expr(r)})])"
+                passes, m = [ctors], meta1
+                for _ in range((int(r) if r.isdigit() else 2) - 1):
+                    c, m, t = one_pass(m)
+                    passes.append(c)
+                    todos.extend(t)
+                if not r.isdigit() and hw_of(m) != hw_of(meta1):
+                    m = (m[0], m[1])                      # nombre de copies symbolique : taille non suivie
+                meta = m
+
+                def wrap(cs):
+                    return cs[0] if len(cs) == 1 else "nn.Sequential(" + ", ".join(cs) + ")"
+                if all(p == passes[0] for p in passes):
+                    ctor = f"nn.Sequential(*[{wrap(passes[0])} for _ in range({self.rep_expr(r)})])"
+                elif r.isdigit() and int(r) <= 4:
+                    ctor = "nn.Sequential(\n    " + ",\n    ".join(wrap(p) for p in passes) + ",\n)"
+                else:
+                    ctor = f"nn.Sequential({wrap(passes[0])}, *[{wrap(passes[1])} for _ in range({self.rep_expr(r)} - 1)])"
             else:
+                meta = meta1
                 ctor = "nn.Sequential(\n    " + ",\n    ".join(ctors) + ",\n)" if len(ctors) > 1 else \
                     (ctors[0] if ctors else "nn.Identity()")
             base = group_name(n.data.get("hint") or n.label)
@@ -2357,7 +2622,8 @@ class ClassBuilder:
                 "  # " + " + ".join(first_line(split_shapes(g.nodes[c].text)[0]) for c in chain)
             self.add_init(att, ctor, n, list(dict.fromkeys(todos)))
             if not group_name(n.label) and "\n" not in ctor:
-                self.init[-1] = self.init[-1].split("  # ")[0] + com
+                self.init[-1] = self.init[-1].split("  # ")[0] + com + \
+                    (" — TODO : " + self.init[-1].split("TODO : ", 1)[1] if "TODO : " in self.init[-1] else "")
             elif not group_name(n.label):
                 self.init[-len(ctor.split("\n"))] = f"self.{att} = nn.Sequential({com}"
             out = self.out_value(u, ins if len(ins) == 1 else [], meta, hint=hint)
@@ -2380,15 +2646,45 @@ class ClassBuilder:
         cc = self.gen.build(n.data["inner_nodes"], lname, kind="layer",
                             doc=f"Bloc répété « {n.label.strip()} » de {self.name}.",
                             root_group=n.data["group"], ext_inputs=ext)
-        kw = ", ".join(f"{p}={self.hp(p, d)}" for p, d in cc.params.items())
+        kw = ", ".join(f"{p}={self.hp(p, d)}" for p, d in cc.params.items() if p not in cc.in_params)
         r = self.rep_expr(n.data["repeat"])
         gname = g.nodes[n.data["group"]].data.get("name")
         base = ident(n.data.get("hint"), "") or (snake(camel(gname)) + "s" if gname else "blocs")
         att = self.attr(base)
-        self.init.append(f"self.{att} = nn.ModuleList([{cc.name}({kw}) for _ in range({r})])"
-                         + self.comment(n))
-        others = [self.values.get(sp) or self.values.get((sp[0], 0)) for sp in srcs[1:]]
         meta = main_val.meta if main_val else (None, None)
+        in_p = next((p for p, j in cc.in_params.items() if j == 0), None)
+        todos = []
+        if in_p:                                         # taille d'entrée : celle reçue, puis celle produite
+            cin = self.in_size(meta[1], todos, meta[0])
+            o = cc.out_meta[1]
+            grows = o is not None and str(o) != in_p and re.search(rf"\b{in_p}\b", str(o))
+            cout = subst(o, {in_p: cin}) if o is not None and not grows else cin
+            step = None
+            if grows:                                    # « in_channels + 32 » (DenseNet) : croissance régulière
+                terms = [t.strip() for t in str(o).split(" + ")]
+                if in_p in terms:
+                    terms.remove(in_p)
+                    if terms and not any(re.search(rf"\b{in_p}\b", t) for t in terms):
+                        step = " + ".join(terms)
+                if step is None:
+                    todos.append("la taille change à chaque répétition : préciser l'entrée de chaque bloc")
+            if step is not None:
+                body = f"[{cc.name}({', '.join([f'{cin} + i * {paren(step)}'] + ([kw] if kw else []))}) " \
+                       f"for i in range({r})]"
+                cout, grows = subst(f"{paren(cin)} + {paren(r)} * {paren(step)}", {}), False
+            elif cout == cin or grows:
+                body = f"[{cc.name}({', '.join([cin] + ([kw] if kw else []))}) for _ in range({r})]"
+            else:
+                body = f"[{cc.name}({', '.join([f'{cin} if i == 0 else {cout}'] + ([kw] if kw else []))}) " \
+                       f"for i in range({r})]"
+            sp = hw_of(meta)
+            if sp and (hw_of(cc.out_meta) is None or hw_of(cc.out_meta).dims != sp.dims):
+                sp = None
+            meta = (meta[0], None if grows else cout, sp)
+        else:
+            body = f"[{cc.name}({kw}) for _ in range({r})]"
+        self.add_init(att, f"nn.ModuleList({body})", n, todos)
+        others = [self.values.get(sp) or self.values.get((sp[0], 0)) for sp in srcs[1:]]
         x = main_val.name if main_val else "x"
         main_ins = [(main_val, next(e for e in g.ins(u) if (e.src, e.port) == srcs[0]))] if main_val else []
         out = self.out_value(u, main_ins, meta)
@@ -2400,32 +2696,38 @@ class ClassBuilder:
 
     def emit_repeat_single(self, u, ins, c_uid, spec):
         """Cadre « N× » autour d'un seul bloc (« Basic Block, 128, /2 ») : nn.Sequential de N copies ;
-        un pas (/2) ne s'applique qu'à la première (convention ResNet)."""
+        un pas (/2) ne s'applique qu'à la première (convention ResNet), qui reçoit aussi la taille d'entrée."""
         g = self.g
         n, cn = g.nodes[u], g.nodes[c_uid]
         r = n.data["repeat"]
         x, meta, hint = self.combine(u, ins)
         name = ident(n.data.get("hint"), "")
-        note = []
+        note, todos = [], []
         if spec.kind == "defref":
-            cc, ctor = self.defref_ctor(c_uid, spec.p["key"])
+            cc, ctor, out = self.defref_ctor(c_uid, spec.p["key"])
+            f1 = self.def_feats(cc, [meta], todos)
+            m1 = out(f1, meta)
+            f2 = self.def_feats(cc, [m1], todos)
+            c1, c2 = ctor(True, f1), ctor(False, f2)
             if r.isdigit() and int(r) <= 4:
-                parts = [ctor(True)] + [ctor(False)] * (int(r) - 1)
+                parts = [c1] + [c2] * (int(r) - 1)
                 inner = "nn.Sequential(\n    " + ",\n    ".join(parts) + ",\n)"
             else:
-                inner = f"nn.Sequential({ctor(True)}, *[{ctor(False)} for _ in range({self.rep_expr(r)} - 1)])"
-            if ctor(True) != ctor(False):
+                inner = f"nn.Sequential({c1}, *[{c2} for _ in range({self.rep_expr(r)} - 1)])"
+            if ctor(True, f2) != ctor(False, f2):
                 note = ["pas : premier bloc seulement"]
+            meta = out(f2, m1, with_stride=False)
             att = self.attr(name or snake(cc.name) + "s")
         else:
-            one = f"{self.gen.stub_class(cn.text, 1)}()" if spec.kind == "stub" else spec.p["expr"]
+            one = f"{self.gen.stub_class(cn.text, 1)}()" if spec.kind == "stub" else \
+                spec.p["expr"].replace("{in}", self.in_size(meta[1], todos, meta[0]))
             inner = f"nn.Sequential(*[{one} for _ in range({self.rep_expr(r)})])"
             att = self.attr(name or ident(cn.text, "bloc") + "s")
-        self.add_init(att, inner, n, [])
+        self.add_init(att, inner, n, todos)
         if note:
             self.init[-1] += "  # " + note[0]
-        out = self.out_value(u, ins if len(ins) == 1 else [], meta, hint=hint)
-        self.fwd.append(f"{out.name} = self.{att}({x})  # {label_line(cn.text)} ×{r}")
+        out_v = self.out_value(u, ins if len(ins) == 1 else [], meta, hint=hint)
+        self.fwd.append(f"{out_v.name} = self.{att}({x})  # {label_line(cn.text)} ×{r}")
 
     def rep_expr(self, r):
         if r is None:

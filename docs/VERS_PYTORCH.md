@@ -38,7 +38,7 @@ aléatoires de forme plausible et affiche la forme de la sortie et le nombre de 
 | flèche vers le vide, ou texte à l'arrivée | valeur renvoyée |
 | cadre `N×` (ou `2× Nom`) | bloc répété : `nn.ModuleList` + boucle, ou `nn.Sequential` de N copies |
 | cadre nommé (`Bloc 1`, `couche cachée`) autour d'une chaîne | `nn.Sequential` du même nom |
-| cadre en pointillés titré (`Basic Block`), ou schéma à part avec un titre en gras | une classe, utilisée par les blocs qui portent ce titre (`Basic Block` + `128, /2` → `BasicBlock(128, stride=2)`) |
+| cadre en pointillés titré (`Basic Block`), ou schéma à part avec un titre en gras | une classe, utilisée par les blocs qui portent ce titre (`Basic Block` + `128, /2` → `BasicBlock(64, 128, stride=2)`, 64 étant les canaux reçus) |
 | flèches de couleur expliquées par une légende (flèche + texte : `Max Pool 2×2`, `Up-conv 2×2`, `copie + concaténation`) | l'opération sur chaque flèche de cette couleur (U-Net) |
 | cellules récurrentes dessinées dépliées dans le temps (LSTM → LSTM → LSTM) | un seul module, appelé à chaque pas, l'état passant de l'un à l'autre |
 | `Positional Encoding` ou `[class] token + Position Embedding` posé à côté d'un ⊕ | module d'encodage de position (sinusoïdal ou appris) |
@@ -50,9 +50,21 @@ Le titre en gras du schéma devient le nom de la classe : `ResNet-18` → `ResNe
 
 ## Choix par défaut
 
-- Les couches utilisent les modules **« Lazy »** (`nn.LazyConv2d`, `nn.LazyLinear`, `nn.LazyBatchNorm2d`) :
-  le nombre de canaux **d'entrée**, que les schémas ne donnent presque jamais, est déduit au premier
-  passage. Faire un passage d'essai avant de créer l'optimiseur.
+- Les couches sont des couches **classiques** (`nn.Conv2d(64, 128, …)`, `nn.Linear(4096, 1000)`,
+  `nn.BatchNorm2d(128)`). Le nombre de canaux **d'entrée**, que les schémas ne donnent presque jamais,
+  est suivi de couche en couche depuis l'entrée du réseau : sortie d'une couche = entrée de la suivante,
+  canaux additionnés par une concaténation. Changer une taille de sortie demande donc de changer aussi
+  l'entrée de la couche qui suit.
+- L'entrée du réseau devient un argument du constructeur : `in_channels` pour une image (lu dans le
+  texte : `224×224×3`, `RGB`, `niveaux de gris` ; sinon 3, marqué `TODO`), `in_features` pour un vecteur.
+- Une `Linear` après un `Flatten` reçoit `C * H * W` (`nn.Linear(512 * 7 * 7, 4096)`), calculé à partir de
+  la taille de l'image d'entrée. Si cette taille ou le padding des convolutions est supposé, un `TODO`
+  le signale.
+- Un bloc détaillé dans un cadre (`Basic Block`) reçoit sa taille d'entrée en premier argument :
+  `BasicBlock(64, 128, stride=2)`, avec un raccourci Conv 1×1 quand le pas ou le nombre de canaux change.
+  Un bloc répété dont les canaux changent est construit en conséquence
+  (`Bloc(64 if i == 0 else 128)`, `Bloc(64 + i * 32)` pour une croissance à la DenseNet).
+- Une taille impossible à déduire reçoit 64 et un `TODO`.
 - Convolution : padding « same » (`k // 2`, ou calculé à partir des formes si elles sont écrites).
   Pooling sans pas indiqué : pas 2 pour un noyau 2×2, sinon pas 1.
 - Une `Linear` après des convolutions reçoit un `nn.Flatten()`.
@@ -64,6 +76,8 @@ Le titre en gras du schéma devient le nom de la classe : `ResNet-18` → `ResNe
 ## Dessiner pour un meilleur code
 
 - **Écrire les réglages dans le texte des blocs** : `Conv 3×3, 64, /2` plutôt que `Conv`.
+- **Écrire la taille de l'entrée** : `Image 224×224×3` donne `in_channels` et la taille exacte avant un
+  `Flatten` ; sans elle, l'essai suppose 3 canaux et 64×64 (marqué `TODO`).
 - **Entrées d'une attention** (bas du bloc, de gauche à droite) : **V, K, Q**, comme dans la figure du
   Transformer. Ou étiqueter les entrées `Q`, `K`, `V` : les noms l'emportent sur la position.
 - **Détailler un bloc** : cadre en pointillés titré du nom du bloc, une flèche qui entre (étiquetée `x`)
@@ -75,9 +89,11 @@ Le titre en gras du schéma devient le nom de la classe : `ResNet-18` → `ResNe
 ## Blocs personnels
 
 Dans la fenêtre **Nouveau bloc / Modifier le bloc**, le champ **Code PyTorch** (facultatif) donne le
-module à utiliser pour ce bloc, par exemple `nn.Sequential(nn.LazyConv2d(32, 1), nn.Sigmoid())`.
-Il est enregistré dans `mes_blocs.yaml` (clé `pytorch`). Sans lui, DeepGraph lit le texte du bloc,
-ou crée une classe vide à compléter.
+module à utiliser pour ce bloc, par exemple `nn.Sequential(nn.Conv2d({in}, 32, 1), nn.Sigmoid())`.
+`{in}` est remplacé par la taille d'entrée du bloc, suivie comme pour les autres couches ; les canaux de
+sortie sont lus dans la dernière `Conv` ou `Linear` de l'expression. Il est enregistré dans
+`mes_blocs.yaml` (clé `pytorch`). Sans lui, DeepGraph lit le texte du bloc, ou crée une classe vide à
+compléter.
 
 ## Aller-retour avec l'import PyTorch
 

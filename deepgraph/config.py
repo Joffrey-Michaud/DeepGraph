@@ -59,7 +59,7 @@ class BlockDef:
     text_color: Optional[str] = None
     bold: bool = False
     stack: int = 0
-    pytorch: str = ""            # constructeur PyTorch pour l'export en code (ex. nn.LazyConv2d(64, 3))
+    pytorch: str = ""            # constructeur PyTorch pour l'export en code (ex. nn.Conv2d({in}, 64, 3))
     origin: str = "base"         # base (blocks.yaml) | user (mes_blocs.yaml) | override (les deux)
 
 
