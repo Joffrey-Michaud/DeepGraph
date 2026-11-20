@@ -126,6 +126,30 @@ def surface(item, color):
     return c
 
 
+def tint(item, color):
+    """Remplissage d'un bloc ou d'un opérateur : en mode sombre (écran seulement), une teinte
+    claire devient une version foncée de la même couleur, plus claire que le fond des groupes."""
+    c = QColor(color)
+    if _dark(item):
+        h, s_, l, a = c.getHsl()
+        if l > 150:
+            c = QColor.fromHsl(max(h, 0), s_ * DARK_SAT // 100, DARK_L + (255 - l) // 3, a)
+    return c
+
+
+DARK_SAT, DARK_L, RIM_L = 60, 55, 150     # mode sombre : saturation (%), clarté du fond, du contour
+
+
+def rim(item, fill, border):
+    """Contour d'un bloc ou d'un opérateur. En mode sombre, autour d'un remplissage clair
+    (donc assombri par tint) : la même teinte, plus claire, plutôt qu'un trait blanc."""
+    if _dark(item):
+        h, s_, l, a = QColor(fill).getHsl()
+        if l > 150:
+            return QColor.fromHsl(max(h, 0), s_ * DARK_SAT // 100, RIM_L, 255)
+    return ink(item, border)
+
+
 def skip_paint(item):
     """Pendant un export de la sélection, les éléments non retenus ne sont pas dessinés."""
     s = item.scene()
@@ -573,8 +597,8 @@ class BlockItem(NodeItem):
         st = CFG.style
         painter.setRenderHint(QPainter.Antialiasing)
         r = float(st["corner_radius"])
-        border = ink(self, st["border_color"])   # contour sur le fond : clair en mode sombre
-        fill = QColor(self.color)
+        border = rim(self, self.color, st["border_color"])
+        fill = tint(self, self.color)
         bw = self.eff_border()
         op0 = painter.opacity()                  # inclut l'opacité du calque
         painter.setOpacity(op0 * max(0, min(100, int(self.opacity_pct))) / 100.0)
@@ -606,7 +630,7 @@ class BlockItem(NodeItem):
         painter.setPen(pen)
         painter.setBrush(fill)
         painter.drawRoundedRect(self.rect(), r, r)
-        painter.setPen(QColor(self.text_color))
+        painter.setPen(ink(self, self.text_color))
         richtext.draw(painter, self.rect().adjusted(4, 1, -4, -1), self.text, self.text_size(),
                       self.bold, self.italic, Qt.AlignHCenter, wrap=True)
         painter.setOpacity(op0)
@@ -665,12 +689,12 @@ class OperatorItem(NodeItem):
         painter.setRenderHint(QPainter.Antialiasing)
         border = QColor(st["border_color"])
         bw = self.eff_border()
-        painter.setPen(QPen(ink(self, border), bw))   # contour : clair en mode sombre
-        painter.setBrush(QColor(self.color))
+        painter.setPen(QPen(rim(self, self.color, border), bw))   # mode sombre : contour clair
+        painter.setBrush(tint(self, self.color))
         r = self.rect()
         painter.drawEllipse(r)
-        draw_symbol(painter, r.center(), self.w / 2, self.symbol, border, bw,
-                    QColor(st["text_color"]), CFG.font(max(6, self.w * 0.6)))
+        draw_symbol(painter, r.center(), self.w / 2, self.symbol, ink(self, border), bw,
+                    ink(self, st["text_color"]), CFG.font(max(6, self.w * 0.6)))
         self.paint_selection(painter)
 
 
