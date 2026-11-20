@@ -48,6 +48,7 @@ Réglages globaux (facultatifs), à côté de `nodes` et `arrows` :
 | `arrow_width` | 1.6 | épaisseur des flèches |
 | `fit_text` | false | `true` : l'éditeur agrandit les blocs dont le texte déborderait (conseillé : tu n'as plus à calculer `w` / `h` au pixel près) |
 | `fit_shrink` | true | avec `fit_text` : un bloc agrandi revient à sa taille (`w`, `h`) quand le texte rétrécit |
+| `tinted_borders` | false | `true` : le bord des blocs et des opérateurs prend la teinte de leur fond, en plus foncé (sinon : couleur de bord commune) |
 
 Ne les mets que si l'utilisateur demande une police, une taille de texte ou des épaisseurs particulières (par exemple
 une police à empattements pour suivre le texte d'un article).

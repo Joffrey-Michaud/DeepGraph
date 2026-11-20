@@ -46,7 +46,8 @@ python main.py --update             # installe la dernière release
 | Guides d'alignement | lignes roses pendant un déplacement (bords et centres) ; menu Affichage pour les couper |
 | Sans magnétisme | maintenir **Maj** (grille et guides) |
 | Se retrouver | **Recentrer** (touche Origine) : zoom 100 % centré sur le diagramme ; **Tout afficher** (Ctrl+1) |
-| Mode sombre | Affichage > Mode sombre (Ctrl+Maj+D) ; les exports restent sur fond blanc |
+| Bords teintés | case de la barre d'outils : le bord des blocs et des opérateurs prend la teinte de leur fond (plus foncée ; plus claire en mode sombre) au lieu de la couleur de bord commune. Enregistré dans le fichier, utilisé à l'export |
+| Mode sombre | Affichage > Mode sombre (Ctrl+Maj+D) : blocs assombris dans leur teinte, texte clair ; les exports restent en couleurs claires sur fond blanc |
 
 Les diagrammes sont enregistrés en `.dgraph` (JSON lisible).
 

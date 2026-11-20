@@ -394,6 +394,14 @@ class MainWindow(QMainWindow):
         self.shrink_box.setEnabled(self.scene.fit_text)
         self.shrink_box.toggled.connect(lambda v: self.scene.set_global("fit_shrink", v))
         tb2.addWidget(self.shrink_box)
+        self.tint_box = QCheckBox("Bords teintés")
+        self.tint_box.setToolTip("Le contour des blocs et des opérateurs prend la teinte de leur fond "
+                                 "(plus foncée, ou plus claire en mode sombre)\nau lieu de la couleur de bord "
+                                 "commune. Enregistré dans le fichier .dgraph, utilisé aussi à l'export.")
+        self.tint_box.setChecked(self.scene.tinted_borders)
+        self.tint_box.toggled.connect(lambda v: self.scene.set_global("tinted_borders", v))
+        tb2.addWidget(QLabel("  "))
+        tb2.addWidget(self.tint_box)
         self.scene.settingsChanged.connect(self._sync_widths)
 
         tb2.addSeparator()
@@ -419,7 +427,8 @@ class MainWindow(QMainWindow):
 
     # ----------------------------------------------------------------- état
     def _sync_widths(self):
-        for box, val in ((self.fit_box, self.scene.fit_text), (self.shrink_box, self.scene.fit_shrink)):
+        for box, val in ((self.fit_box, self.scene.fit_text), (self.shrink_box, self.scene.fit_shrink),
+                         (self.tint_box, self.scene.tinted_borders)):
             if box.isChecked() != val:
                 box.blockSignals(True)
                 box.setChecked(val)

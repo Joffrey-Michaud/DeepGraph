@@ -137,17 +137,21 @@ def tint(item, color):
     return c
 
 
-DARK_SAT, DARK_L, RIM_L = 60, 55, 150     # mode sombre : saturation (%), clarté du fond, du contour
+DARK_SAT, DARK_L = 60, 55     # mode sombre : saturation gardée (%), clarté de base du fond
 
 
 def rim(item, fill, border):
-    """Contour d'un bloc ou d'un opérateur. En mode sombre, autour d'un remplissage clair
-    (donc assombri par tint) : la même teinte, plus claire, plutôt qu'un trait blanc."""
+    """Contour d'un bloc ou d'un opérateur. Réglage « bords de la teinte du bloc » : la couleur du
+    fond, plus foncée (plus claire en mode sombre, où le fond est assombri par tint) ;
+    sinon la couleur de bord globale (claire en mode sombre)."""
+    s = item.scene()
+    if s is None or not getattr(s, "tinted_borders", False):
+        return ink(item, border)
+    h, s_, l, _ = tint(item, fill).getHsl()
+    h = max(h, 0)
     if _dark(item):
-        h, s_, l, a = QColor(fill).getHsl()
-        if l > 150:
-            return QColor.fromHsl(max(h, 0), s_ * DARK_SAT // 100, RIM_L, 255)
-    return ink(item, border)
+        return QColor.fromHsl(h, s_, max(150, min(235, l + 85)))
+    return QColor.fromHsl(h, s_ * 4 // 5, l * 11 // 20)
 
 
 def skip_paint(item):
