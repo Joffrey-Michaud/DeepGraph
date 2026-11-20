@@ -47,6 +47,11 @@ def free_move():
 SYMBOLS = [("concat", "Concaténation"), ("plus", "Addition"), ("minus", "Différence"),
            ("times", "Multiplication"), ("dot", "Produit terme à terme")]
 
+# Longueur d'une branche de +, − et ×, en fraction du rayon. Il faut un vide net entre le
+# symbole et le cercle : avec 0.76, le + touchait presque le bord et se confondait de loin
+# avec la croix de la concaténation (qui, elle, va jusqu'au cercle).
+INNER_SYMBOL = 0.5
+
 
 def draw_symbol(painter, c, rad, symbol, color, width, text_color=None, font=None):
     """Dessine le symbole intérieur d'un opérateur centré en c, de rayon rad."""
@@ -55,12 +60,12 @@ def draw_symbol(painter, c, rad, symbol, color, width, text_color=None, font=Non
     painter.setPen(pen)
     painter.setBrush(Qt.NoBrush)
     if symbol in ("concat", "plus", "minus"):
-        L = rad if symbol == "concat" else rad * 0.76
+        L = rad if symbol == "concat" else rad * INNER_SYMBOL
         painter.drawLine(QPointF(c.x() - L, c.y()), QPointF(c.x() + L, c.y()))
         if symbol != "minus":
             painter.drawLine(QPointF(c.x(), c.y() - L), QPointF(c.x(), c.y() + L))
     elif symbol == "times":
-        d = rad * 0.54
+        d = rad * INNER_SYMBOL / math.sqrt(2)      # mêmes branches que le +, en diagonale
         painter.drawLine(QPointF(c.x() - d, c.y() - d), QPointF(c.x() + d, c.y() + d))
         painter.drawLine(QPointF(c.x() - d, c.y() + d), QPointF(c.x() + d, c.y() - d))
     elif symbol == "dot":
