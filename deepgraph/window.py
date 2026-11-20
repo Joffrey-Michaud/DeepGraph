@@ -4,8 +4,8 @@ import os
 
 from PyQt5.QtCore import Qt, QFileSystemWatcher, QSettings, QTimer, QUrl
 from PyQt5.QtGui import QColor, QDesktopServices, QFont, QFontDatabase, QKeySequence, QPalette
-from PyQt5.QtWidgets import (QAction, QActionGroup, QApplication, QColorDialog, QComboBox, QDockWidget,
-                             QStackedWidget,
+from PyQt5.QtWidgets import (QAction, QActionGroup, QApplication, QColorDialog, QComboBox, QDialog,
+                             QDialogButtonBox, QDockWidget, QFormLayout, QLineEdit, QStackedWidget,
                              QDoubleSpinBox, QFileDialog, QInputDialog, QLabel, QMainWindow,
                              QMenu, QMessageBox, QSpinBox, QStyle, QCheckBox)
 
@@ -771,7 +771,8 @@ class MainWindow(QMainWindow):
             a.triggered.connect(lambda checked=False, p=path, t=title, md=mode: self.use_model(p, t, md))
         if user:
             sub.addSeparator()
-            sub.addAction("Renommer…").triggered.connect(lambda checked=False, p=path: self.rename_my_model(p))
+            sub.addAction("Renommer ou changer de catégorie…").triggered.connect(
+                lambda checked=False, p=path: self.rename_my_model(p))
             sub.addAction("Supprimer de mes modèles…").triggered.connect(
                 lambda checked=False, p=path: self.delete_my_model(p))
         return sub
@@ -853,6 +854,48 @@ class MainWindow(QMainWindow):
                 parts.append(p)
         return parts
 
+    def _my_categories(self):
+        d = self.MY_MODELS_DIR
+        if not os.path.isdir(d):
+            return []
+        return sorted((f for f in os.listdir(d) if os.path.isdir(os.path.join(d, f)) and not f.startswith(".")),
+                      key=str.lower)
+
+    def _ask_model_name(self, title, name, category=""):
+        """Fenêtre nom + catégorie (existante ou nouvelle) -> [catégorie?, nom] nettoyés, ou [] si annulé."""
+        dlg = QDialog(self)
+        dlg.setWindowTitle(title)
+        form = QFormLayout(dlg)
+        ed = QLineEdit(name)
+        ed.selectAll()
+        form.addRow("Nom :", ed)
+        cb = QComboBox()
+        cb.setEditable(True)
+        cb.addItems([""] + self._my_categories())
+        cb.lineEdit().setPlaceholderText("(aucune)")
+        cb.setCurrentText(category)
+        form.addRow("Catégorie :", cb)
+        hint = QLabel("Choisir une catégorie existante ou en taper une nouvelle : elle devient un sous-menu "
+                      "de Fichier > Mes modèles. Vide : le modèle est rangé à la racine du menu.")
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: gray")
+        form.addRow(hint)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.button(QDialogButtonBox.Cancel).setText("Annuler")
+        bb.accepted.connect(dlg.accept)
+        bb.rejected.connect(dlg.reject)
+        form.addRow(bb)
+        dlg.resize(460, dlg.sizeHint().height())
+        if dlg.exec_() != QDialog.Accepted:
+            return []
+        parts = self._clean_name(ed.text())          # « Catégorie/Nom » tapé dans le nom : accepté aussi
+        if not parts:
+            return []
+        if len(parts) == 1:
+            cat = self._clean_name(cb.currentText().replace("/", "-"))
+            parts = cat[:1] + parts
+        return parts
+
     def add_to_my_models(self, selection=False):
         sel = self.scene.selectedItems() if selection else None
         if selection and not sel:
@@ -860,10 +903,7 @@ class MainWindow(QMainWindow):
             return False
         default = os.path.splitext(os.path.basename(self.current_file))[0] \
             if self.current_file and not selection else "Mon modèle"
-        name, ok = QInputDialog.getText(self, "Ajouter à mes modèles",
-                                        "Nom du modèle (« Catégorie/Nom » pour le ranger dans un sous-menu) :",
-                                        text=default)
-        parts = self._clean_name(name) if ok else []
+        parts = self._ask_model_name("Ajouter à mes modèles", default)
         if not parts:
             return False
         folder = os.path.join(self.MY_MODELS_DIR, *parts[:-1])
@@ -890,16 +930,26 @@ class MainWindow(QMainWindow):
         return True
 
     def rename_my_model(self, path):
+        """Renommer et / ou changer de catégorie (déplacer dans un autre sous-dossier de mes_modeles)."""
         old = os.path.splitext(os.path.basename(path))[0]
-        name, ok = QInputDialog.getText(self, "Renommer le modèle", "Nouveau nom :", text=old)
-        parts = self._clean_name(name) if ok else []
-        if not parts or parts[-1] == old:
+        folder = os.path.dirname(path)
+        root = os.path.abspath(self.MY_MODELS_DIR)
+        old_cat = "" if os.path.abspath(folder) == root else os.path.basename(folder)
+        parts = self._ask_model_name("Renommer ou changer de catégorie", old, old_cat)
+        if not parts:
             return False
-        new = os.path.join(os.path.dirname(path), parts[-1] + ".dgraph")
+        new_folder = os.path.join(self.MY_MODELS_DIR, *parts[:-1])
+        new = os.path.join(new_folder, parts[-1] + ".dgraph")
+        if os.path.abspath(new) == os.path.abspath(path):
+            return False
         if os.path.exists(new):
-            QMessageBox.warning(self, "Mes modèles", f"« {parts[-1]} » existe déjà.")
+            QMessageBox.warning(self, "Mes modèles", f"« {' > '.join(parts)} » existe déjà.")
             return False
+        os.makedirs(new_folder, exist_ok=True)
         os.rename(path, new)
+        if os.path.abspath(folder) != root and not os.listdir(folder):
+            os.rmdir(folder)                          # catégorie devenue vide
+        self.statusBar().showMessage(f"Modèle rangé dans Fichier > Mes modèles > {' > '.join(parts)}", 5000)
         return True
 
     def delete_my_model(self, path):
