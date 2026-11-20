@@ -2,6 +2,7 @@
 
     python outils/generer_modeles.py            # écrit modeles/*.dgraph + modeles/index.json
     python outils/generer_modeles.py --png DIR  # + un aperçu PNG de chaque modèle dans DIR
+    python outils/generer_modeles.py seresnet   # seulement les modèles nommés (et index.json)
 
 Chaque modèle est une fonction `build_xxx(d)` qui dessine avec les petites aides de `Draw`.
 Les blocs viennent de blocks.yaml quand c'est possible (leur description s'affiche alors
@@ -42,6 +43,7 @@ GREY = "#555555"
 class Draw:
     def __init__(self):
         self.sc = DiagramScene()
+        self.sc.tinted_borders = False           # comme les modèles types déjà publiés
 
     # ------------------------------------------------------------- éléments
     def _place(self, it, x, y):
@@ -283,6 +285,63 @@ def build_resnet18(d):
             margin=16, margin_right=110, label_size=13)
     d.title("ResNet-18", "He, Zhang, Ren & Sun, Deep residual learning for image recognition, CVPR 2016",
             150, y + 3 * 44 + 30)
+
+
+def build_seresnet(d):
+    W = 160
+    specs = [
+        (None, "Image 224×224×3", dict(color=IO, w=W)),
+        ("Conv2D", "Conv 7×7, 64, /2", dict(w=W)),
+        (None, "BN + ReLU", dict(color=NORM, w=W)),
+        ("Max Pooling", "Max Pool 3×3, /2", dict(w=W)),
+    ]
+    top = d.col(specs, 0, 0, 46)
+    y = 3 * 46 + 66
+    stages = []
+    for name, ch, down, n in (("conv2_x", 256, "", 3), ("conv3_x", 512, ", /2", 4), ("conv4_x", 1024, ", /2", 6),
+                              ("conv5_x", 2048, ", /2", 3)):
+        b = d.blk(f"SE-Bottleneck\n{ch}{down}", 0, y, STAGE, w=W, h=40, stack=1)
+        g = d.group([b], f"{n}×", "left", fill=FILL, margin=8)
+        d.txt(name, g.scene_frame().right() + 12, y, 10, GREY, align="left")
+        stages.append(b)
+        y += 74
+    tail = d.col([("Avg Pooling", "Avg Pool global", dict(w=W)), ("Linear", "FC 1000", dict(w=W, h=28)),
+                  ("Softmax", "Softmax", dict(w=W, h=28))], 0, y - 8, 44)
+    d.chain([top[-1]] + stages + [tail[0]])
+
+    # détail du bloc : Bottleneck, puis Squeeze-and-Excitation (recalibrage des canaux)
+    X, Y, X2 = 400, 120, 570
+    x_in = d.junc(X, Y)
+    det = d.col([("Conv 1×1", "Conv 1×1, C/4", dict(w=130)), (None, "BN + ReLU", dict(color=NORM, w=130)),
+                 ("Conv 3×3", "Conv 3×3, C/4", dict(w=130)), (None, "BN + ReLU", dict(color=NORM, w=130)),
+                 ("Conv 1×1", "Conv 1×1, C", dict(w=130)), ("Batch Norm", "Batch Norm", dict(w=130))],
+                X, Y + 40, 44)
+    j = d.junc(X, Y + 40 + 5 * 44 + 40)
+    se = d.col([("Avg Pooling", "Global Avg Pool", dict(w=130)), ("Linear", "FC C/16", dict(w=130)),
+                ("ReLU", "ReLU", dict(w=130)), ("Linear", "FC C", dict(w=130)), ("Sigmoid", "Sigmoid", dict(w=130))],
+               X2, j.scenePos().y() + 50, 44)
+    mul = d.op("times", X, se[-1].scene_frame().center().y())
+    plus = d.op("plus", X, mul.scene_frame().center().y() + 50)
+    relu = d.lib("ReLU", X, plus.scene_frame().center().y() + 40, w=130)
+    xt = d.txt("x", X, Y - 50, 13, italic=True)
+    d.ar(xt, x_in, B, C, head="none")
+    d.ar(x_in, det[0], sa=C)
+    d.ar(det[-1], j, B, C, head="none")
+    d.ar(j, mul, C, T)
+    d.ar(j, se[0], C, T, "ortho1", first="h")
+    d.ar(se[-1], mul, L, R)
+    d.ar(mul, plus)
+    d.ar(plus, relu)
+    d.ar(relu, P(X, relu.scene_frame().bottom() + 40))
+    d.residual(x_in, plus, side=-1, off=105, sb=L)
+    d.txt("identité x\n(Conv 1×1, /2\nsi la forme change)", X - 210, Y + 150, 10, GREY, italic=True, align="left")
+    d.side_note(se[0], "squeeze : 1×1×C")
+    d.side_note(se[2], "excitation\n(r = 16)")
+    d.txt("recalibrage\ndes canaux", X - 20, mul.scene_frame().center().y(), 10, GREY, italic=True, align="right")
+    d.group([x_in] + det + [j] + se + [mul, plus, relu], "SE-Bottleneck", "top", fill="#FFFFFF",
+            border_style="dashed", margin=16, margin_left=120, margin_right=110, label_size=13)
+    bottom = tail[-1].scene_frame().bottom()
+    d.title("SE-ResNet-50", "Hu, Shen & Sun,\nSqueeze-and-excitation networks, CVPR 2018", 0, bottom + 36)
 
 
 def build_inception(d):
@@ -601,6 +660,8 @@ MODELS = [
     ("inception", "Module Inception (GoogLeNet)", "Réseaux convolutifs", "Szegedy et al., 2015",
      build_inception),
     ("resnet18", "ResNet-18", "Réseaux convolutifs", "He et al., 2016", build_resnet18),
+    ("seresnet", "SE-ResNet-50 (Squeeze-and-Excitation)", "Réseaux convolutifs", "Hu et al., 2018",
+     build_seresnet),
     ("unet", "U-Net", "Réseaux convolutifs", "Ronneberger et al., 2015", build_unet),
     ("transformer", "Transformer (encodeur–décodeur)", "Attention / Transformers", "Vaswani et al., 2017",
      build_transformer),
@@ -620,8 +681,12 @@ def main():
         png_dir = sys.argv[sys.argv.index("--png") + 1]
         os.makedirs(png_dir, exist_ok=True)
     os.makedirs(OUT, exist_ok=True)
+    only = [a for a in sys.argv[1:] if not a.startswith("-") and a != png_dir]
     index = []
     for fname, title, cat, ref, fn in MODELS:
+        index.append({"file": fname + ".dgraph", "title": title, "category": cat, "ref": ref})
+        if only and fname not in only:
+            continue
         d = Draw()
         fn(d)
         d.sc.clearSelection()
@@ -630,7 +695,6 @@ def main():
         path = os.path.join(OUT, fname + ".dgraph")
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=1, ensure_ascii=False)
-        index.append({"file": fname + ".dgraph", "title": title, "category": cat, "ref": ref})
         if png_dir:
             export_scene(d.sc, os.path.join(png_dir, fname + ".png"), "png", scale=1.5)
         print(f"{fname:12s} {len(d.sc.nodes()):3d} éléments, {len(d.sc.arrows()):3d} flèches")

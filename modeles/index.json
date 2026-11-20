@@ -30,6 +30,12 @@
   "ref": "He et al., 2016"
  },
  {
+  "file": "seresnet.dgraph",
+  "title": "SE-ResNet-50 (Squeeze-and-Excitation)",
+  "category": "Réseaux convolutifs",
+  "ref": "Hu et al., 2018"
+ },
+ {
   "file": "unet.dgraph",
   "title": "U-Net",
   "category": "Réseaux convolutifs",
