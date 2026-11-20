@@ -46,7 +46,7 @@ class DiagramScene(LayersMixin, QGraphicsScene):
         self.font_size = int(CFG.style["font_size"])        # taille globale du texte (px)
         self.fit_text = True              # blocs agrandis pour que leur texte ne déborde pas
         self.fit_shrink = True            # … et qui reviennent à leur taille quand le texte rétrécit
-        self.tinted_borders = False       # contour des blocs et opérateurs de la teinte de leur fond
+        self.tinted_borders = True        # contour des blocs et opérateurs de la teinte de leur fond
         self.dark = False  # mode sombre (affichage seulement, jamais à l'export)
         self._init_layers()
         self._hl_layer = None      # calque survolé dans le panneau (surbrillance)
@@ -504,7 +504,7 @@ class DiagramScene(LayersMixin, QGraphicsScene):
         self.font_size = int(st.get("font_size", CFG.style["font_size"]))
         self.fit_text = bool(st.get("fit_text", False))       # ancien fichier : tailles inchangées
         self.fit_shrink = bool(st.get("fit_shrink", True))
-        self.tinted_borders = bool(st.get("tinted_borders", False))
+        self.tinted_borders = bool(st.get("tinted_borders", False))   # ancien fichier : bords inchangés
         if (st.get("font") or None) != CFG.family_override:
             CFG.set_family_override(st.get("font") or None)
             self.refresh_style()

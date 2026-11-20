@@ -711,7 +711,7 @@ class MainWindow(QMainWindow):
     def new_file(self):
         if not self.maybe_save():
             return
-        self.scene.load({"nodes": [], "arrows": [], "settings": {"fit_text": True}})
+        self.scene.load({"nodes": [], "arrows": [], "settings": {"fit_text": True, "tinted_borders": True}})
         self.current_file = None
         self.saved_state = self.scene.current_state()
         self.view.zoom_reset()
