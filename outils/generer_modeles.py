@@ -271,8 +271,8 @@ def build_resnet18(d):
                  ("Batch Norm", "Batch Norm", dict(w=130))], X, Y + 40, 44)
     plus = d.op("plus", X, Y + 40 + 4 * 44 + 40)
     relu = d.lib("ReLU", X, Y + 40 + 4 * 44 + 80, w=130)
-    d.ar(P(X, Y - 40), x_in, sb=C, head="none")
-    d.txt("x", X - 10, Y - 34, 13, italic=True)
+    xt = d.txt("x", X, Y - 50, 13, italic=True)
+    d.ar(xt, x_in, B, C, head="none")
     d.ar(x_in, det[0], sa=C)
     d.ar(det[-1], plus)
     d.ar(plus, relu)
@@ -354,11 +354,11 @@ def build_transformer(d):
     XE, XD = -150, 150
     W = 150
     # ---------------------------------------------------------------- encodeur
-    d.txt("Inputs", XE, 0, 13)
+    inp = d.txt("Inputs", XE, 0, 13)
     emb = d.lib("Input Embedding", XE, -50, w=W)
     pe = d.op("plus", XE, -98)
     pos = d.lib("Positional Encoding", XE - 140, -98, "Positional\nEncoding", w=90)
-    d.ar(P(XE, -12), emb, sb=B)
+    d.ar(inp, emb, T, B)
     d.ar(emb, pe, T, B)
     d.ar(pos, pe, R, L)
     j1 = d.junc(XE, -135)
@@ -378,11 +378,11 @@ def build_transformer(d):
     d.group([j1, mha, an1, j2, ffn, an2], "N×", "left", margin=12, margin_left=24, margin_top=14,
             margin_bottom=4)
     # ---------------------------------------------------------------- décodeur
-    d.txt("Outputs\n(shifted right)", XD, -5, 13)
+    outs = d.txt("Outputs\n(shifted right)", XD, -5, 13)
     emb2 = d.lib("Output Embedding", XD, -50, w=W)
     pe2 = d.op("plus", XD, -98)
     pos2 = d.lib("Positional Encoding", XD + 140, -98, "Positional\nEncoding", w=90)
-    d.ar(P(XD, -24), emb2, sb=B)
+    d.ar(outs, emb2, T, B)
     d.ar(emb2, pe2, T, B)
     d.ar(pos2, pe2, L, R)
     k1 = d.junc(XD, -135)
@@ -418,8 +418,8 @@ def build_transformer(d):
     sm = d.lib("Softmax", XD, -705, w=W)
     d.ar(dan3, lin, T, B)
     d.ar(lin, sm, T, B)
-    d.ar(sm, P(XD, -740), T)
-    d.txt("Output\nProbabilities", XD, -765, 13)
+    prob = d.txt("Output\nProbabilities", XD, -765, 13)
+    d.ar(sm, prob, T, B)
     d.title("Transformer", "Vaswani et al., Attention is all you need, NeurIPS 2017", 0, 60)
 
 
@@ -432,28 +432,26 @@ def _below(it, x):
 def build_attention(d):
     # ------------------------------------------- Scaled Dot-Product Attention
     X = -170
-    for t, x in (("Q", X - 30), ("K", X + 10), ("V", X + 60)):
-        d.txt(t, x, 0, 13)
+    q, k, v = (d.txt(t, x, 0, 13) for t, x in (("Q", X - 30), ("K", X + 10), ("V", X + 60)))
     mm1 = d.lib("MatMul", X - 10, -50)
     sc_ = d.lib("Scale", X - 10, -95)
     mk = d.lib("Mask (opt.)", X - 10, -140)
     sm = d.lib("softmax_attention", X - 10, -185)
     mm2 = d.lib("MatMul", X + 25, -240, w=110)         # au-dessus de SoftMax et de V (fig. 2)
-    d.ar(P(X - 30, -12), mm1, sb=(.25, 1))
-    d.ar(P(X + 10, -12), mm1, sb=(.75, 1))
+    d.ar(q, mm1, T, _below(mm1, X - 30))
+    d.ar(k, mm1, T, _below(mm1, X + 10))
     d.chain([mm1, sc_, mk, sm], up=True)
     d.ar(sm, mm2, T, _below(mm2, X - 10))
-    d.ar(P(X + 60, -12), mm2, sb=_below(mm2, X + 60))
+    d.ar(v, mm2, T, _below(mm2, X + 60))
     d.ar(mm2, P(X + 25, -285), T)
     d.txt("Scaled Dot-Product Attention", X + 10, -310, 14, bold=True)
     d.txt("Attention(Q, K, V) = softmax(QKᵀ / √d_k) V", X + 10, 40, 11, GREY, italic=True)
     # ----------------------------------------------------- Multi-Head Attention
     X = 170
-    for t, x in (("V", X - 70), ("K", X), ("Q", X + 70)):
-        d.txt(t, x, 0, 13)
+    labels = [d.txt(t, x, 0, 13) for t, x in (("V", X - 70), ("K", X), ("Q", X + 70))]
     lins = [d.lib("linear_proj", x, -55) for x in (X - 70, X, X + 70)]
-    for x, li in zip((X - 70, X, X + 70), lins):
-        d.ar(P(x, -12), li, sb=B)
+    for lab, li in zip(labels, lins):
+        d.ar(lab, li, T, B)
     sdpa = d.lib("Scaled Dot-Product Attention", X, -125, "Scaled Dot-Product\nAttention", w=190)
     for x, li in zip((X - 70, X, X + 70), lins):         # flèches droites, comme dans l'article
         d.ar(li, sdpa, T, _below(sdpa, x))
@@ -470,11 +468,11 @@ def build_attention(d):
 
 def build_vit(d):
     X, W = 0, 160
-    d.txt("Image → patchs 16×16", X, 0, 13)
+    img = d.txt("Image → patchs 16×16", X, 0, 13)
     pe = d.lib("Patch Embedding", X, -50, "Linear Projection of\nFlattened Patches", w=W)
     plus = d.op("plus", X, -105)
     pos = d.blk("[class] token +\nPosition Embedding", X - 160, -105, "#E9E3F3", w=130, h=40)
-    d.ar(P(X, -12), pe, sb=B)
+    d.ar(img, pe, T, B)
     d.ar(pe, plus, T, B)
     d.ar(pos, plus, R, L)
     j1 = d.junc(X, -135)
@@ -499,8 +497,8 @@ def build_vit(d):
             margin_top=14)
     head = d.lib("MLP", X, -500, "MLP Head", w=W)
     d.ar(a2, head, T, B)
-    d.ar(head, P(X, -540), T)
-    d.txt("Classe", X, -555, 13)
+    cls = d.txt("Classe", X, -555, 13)
+    d.ar(head, cls, T, B)
     d.txt("Transformer Encoder\n(pre-norm)", X - 175, -300, 11, GREY, italic=True)
     d.title("Vision Transformer (ViT)", "Dosovitskiy et al., An image is worth 16×16 words: Transformers "
             "for image recognition at scale, ICLR 2021", 0, 50)
@@ -527,21 +525,21 @@ def build_seq2seq(d):
     dec = [d.lib("LSTM", 30 + DX * i + 30, 0, w=80) for i in range(3)]
     for i, c in enumerate(enc):
         x = c.scene_frame().center().x()
-        d.txt(f"x{'₁₂₃'[i]}", x, 75, 13, italic=True)
+        lab = d.txt(f"x{'₁₂₃'[i]}", x, 75, 13, italic=True)
         emb = d.lib("Embedding", x, 45, "Emb.", w=60, h=22)
-        d.ar(P(x, 63), emb, sb=B)
+        d.ar(lab, emb, T, B)
         d.ar(emb, c, T, B)
     toks = ["<s>", "y₁", "y₂"]
     for i, c in enumerate(dec):
         x = c.scene_frame().center().x()
-        d.txt(toks[i], x, 75, 13, italic=True)
+        lab = d.txt(toks[i], x, 75, 13, italic=True)
         emb = d.lib("Embedding", x, 45, "Emb.", w=60, h=22)
-        d.ar(P(x, 63), emb, sb=B)
+        d.ar(lab, emb, T, B)
         d.ar(emb, c, T, B)
         sm = d.lib("Linear", x, -50, "Linear +\nSoftmax", w=70, h=34)
         d.ar(c, sm, T, B)
-        d.ar(sm, P(x, -90), T)
-        d.txt(f"y{'₁₂₃'[i]}", x, -102, 13, italic=True)
+        y = d.txt(f"y{'₁₂₃'[i]}", x, -102, 13, italic=True)
+        d.ar(sm, y, T, B)
     for a, b in zip(enc + dec, (enc + dec)[1:]):
         d.ar(a, b, R, L)
     d.txt("h, c", (enc[-1].scene_frame().right() + dec[0].scene_frame().left()) / 2, -12, 11, GREY,
@@ -589,8 +587,8 @@ def build_gan(d):
     d.ar(fake, disc, R, (0, .3), "ortho2", first="h")
     d.ar(real, disc, R, (0, .7), "ortho2", first="h")
     d.ar(disc, out, R, L)
-    d.ar(out, P(370, 0), R)
-    d.txt("réel / généré", 380, 0, 12, align="left")
+    verdict = d.txt("réel / généré", 380, 0, 12, align="left")
+    d.ar(out, verdict, R, L)
     d.txt("min_G max_D  E[log D(x)] + E[log(1 − D(G(z)))]", 30, 115, 11, GREY, italic=True)
     d.title("GAN", "Goodfellow et al., Generative adversarial nets, NeurIPS 2014", 30, 160)
 
