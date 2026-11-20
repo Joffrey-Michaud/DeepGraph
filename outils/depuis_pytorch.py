@@ -35,6 +35,30 @@ except ImportError:  # pragma: no cover
 
 CONTAINERS = (nn.ModuleList, nn.ModuleDict, nn.Sequential)
 TRANSPARENT_MODULES = (nn.Identity,)
+# remises en forme sans calcul : invisibles (la forme suivante le montre)
+TRANSPARENT_NAMES = {"Permute", "Transpose", "Reshape", "View", "Rearrange", "Unflatten"}
+# régularisation : leur taux change souvent d'un bloc à l'autre (stochastic depth croissante) ; on
+# l'ignore pour reconnaître les blocs identiques
+REGULARIZERS = {"Dropout", "Dropout1d", "Dropout2d", "Dropout3d", "AlphaDropout", "StochasticDepth",
+                "DropPath", "DropBlock2d", "DropBlock3d"}
+CONTAINER_NAMES = {"IntermediateLayerGetter"}   # enveloppes qui ne font qu'appeler leurs enfants
+NOISE = {"randn_like", "rand_like", "normal", "randn", "rand", "normal_"}
+
+
+def is_container(m):
+    """Liste de modules sans calcul propre : ModuleList / ModuleDict / Sequential exactement (une
+    sous-classe avec son propre forward, comme un bloc de DenseNet, est un vrai module)."""
+    return type(m) in CONTAINERS or type(m).__name__ in CONTAINER_NAMES
+
+
+def struct_sig(m):
+    """Signature d'un module pour repérer les blocs identiques : classe, réglages et sous-modules,
+    sans les taux de régularisation."""
+    name = type(m).__name__
+    if name in REGULARIZERS:
+        return name
+    kids = ",".join(f"{k}={struct_sig(c)}" for k, c in m.named_children())
+    return f"{name}({m.extra_repr()};{kids})"
 
 
 # ======================================================================= traçage
@@ -60,6 +84,18 @@ def _tensors(obj):
     elif isinstance(obj, dict):
         for x in obj.values():
             yield from _tensors(x)
+
+
+def _named_tensors(obj, key=""):
+    """Comme _tensors, avec le nom de chaque tenseur dans un dictionnaire (clé), sinon ""."""
+    if isinstance(obj, torch.Tensor):
+        yield key, obj
+    elif isinstance(obj, (list, tuple)):
+        for x in obj:
+            yield from _named_tensors(x, key)
+    elif isinstance(obj, dict):
+        for k, x in obj.items():
+            yield from _named_tensors(x, str(k))
 
 
 OPS = {
@@ -101,7 +137,7 @@ class Tracer:
             if child in self.info:
                 continue
             q = f"{qual}.{name}" if qual else name
-            lv = level if isinstance(child, CONTAINERS) else level + 1
+            lv = level if is_container(child) else level + 1
             self.info[child] = (q, lv)
             self._walk(child, q, lv)
 
@@ -109,7 +145,7 @@ class Tracer:
         """« leaf » (un bloc), « open » (déplié : on montre son contenu), « skip » (conteneur)."""
         if m is self.model:
             return "open"
-        if isinstance(m, CONTAINERS):
+        if is_container(m):
             return "skip"
         q, lv = self.info.get(m, ("?", 99))
         cls = type(m).__name__
@@ -167,14 +203,14 @@ class Tracer:
             return
         role = self._role(mod)
         if role == "leaf":
-            if isinstance(mod, TRANSPARENT_MODULES):
+            if isinstance(mod, TRANSPARENT_MODULES) or type(mod).__name__ in TRANSPARENT_NAMES:
                 self.frames.append(("transparent", self._inputs((args, kwargs))))
                 self.inside = 1
                 return
             q = self.info[mod][0]
             self.calls[q] += 1
             nid = q if self.calls[q] == 1 else f"{q}#{self.calls[q]}"
-            node = self._new(nid, "module", cls=type(mod).__name__, module=mod, sig=repr(mod))
+            node = self._new(nid, "module", cls=type(mod).__name__, module=mod, sig=struct_sig(mod))
             self._link(self._inputs((args, kwargs)), node)
             self.inside = 1
             self.frames.append(("leaf", node))
@@ -182,7 +218,7 @@ class Tracer:
             q = self.info[mod][0]
             if q not in self.groups:
                 self.groups[q] = type(mod).__name__
-                self.group_sig[q] = repr(mod)
+                self.group_sig[q] = struct_sig(mod)
                 self.group_parent[q] = self.stack[-1] if self.stack else None
             self.stack.append(q)
             self.frames.append(("open", None))
@@ -213,10 +249,16 @@ class Tracer:
         outs = list(_tensors(out))
         if not outs:
             return
+        name = getattr(func, "__name__", "") or ""
+        if name in NOISE:
+            k = sum(1 for n in self.nodes.values() if n.kind == "noise") + 1
+            node = self._new(f"noise{k}", "noise", label="Noise")
+            node.out_shape = tuple(outs[0].shape)
+            self._bind(out, node.id)
+            return
         ins = self._inputs((args, kwargs))
         if not ins:
             return
-        name = getattr(func, "__name__", "") or ""
         cat = OP_OF.get(name)
         if cat in ("add", "sub", "mul", "cat", "matmul") and len(ins) >= 2 \
                 or cat in ("act", "norm", "resize", "attn") \
@@ -262,9 +304,11 @@ class Tracer:
         finally:
             for h in handles:
                 h.remove()
-        outs = list(_tensors(result))
-        for i, t in enumerate(outs):
-            n = self._new(f"out:{i}", "output", label="Output" if len(outs) == 1 else f"Output {i + 1}")
+        named = list(_named_tensors(result))
+        outs = [t for _, t in named]
+        for i, (key, t) in enumerate(named):
+            n = self._new(f"out:{i}", "output",
+                          label=key or ("Output" if len(outs) == 1 else f"Output {i + 1}"))
             n.parent = None
             src = self._src(t)
             if src is not None:
@@ -276,7 +320,7 @@ class Tracer:
     def graph(self):
         g = Graph(self.nodes, self.edges, self.groups)
         g.group_sig, g.group_parent = self.group_sig, self.group_parent
-        g.containers = {q: type(m).__name__ for m, (q, lv) in self.info.items() if isinstance(m, CONTAINERS)}
+        g.containers = {q: type(m).__name__ for m, (q, lv) in self.info.items() if is_container(m)}
         g.prune()
         return g
 
@@ -442,6 +486,14 @@ def builtin_label(m):
               "BatchNorm2d": ("BatchNorm", "Batch Norm"), "BatchNorm3d": ("BatchNorm", "Batch Norm"),
               "InstanceNorm1d": ("InstanceNorm", "Instance Norm"), "InstanceNorm2d": ("InstanceNorm", "Instance Norm"),
               "RMSNorm": ("RMSNorm", "RMS Norm"), "ReLU": ("ReLU", "ReLU"), "GELU": ("GELU", "GELU"),
+              "ReLU6": ("ReLU6", "ReLU"), "PReLU": ("PReLU", "Leaky ReLU"), "Hardswish": ("Hardswish", "SiLU / Swish"),
+              "Hardsigmoid": ("Hardsigmoid", "Sigmoid"), "Softplus": ("Softplus", "Activation"),
+              "GLU": ("GLU", "Activation"), "LogSoftmax": ("LogSoftmax", "Softmax"),
+              "MaxPool3d": ("Max Pooling", "Max Pooling"), "AvgPool3d": ("Avg Pooling", "Avg Pooling"),
+              "AdaptiveMaxPool1d": ("Global Max Pooling", "Max Pooling"),
+              "AdaptiveMaxPool2d": ("Global Max Pooling", "Max Pooling"),
+              "AdaptiveAvgPool3d": ("Global Avg Pooling", "Avg Pooling"), "Unfold": ("Unfold", None),
+              "InstanceNorm3d": ("InstanceNorm", "Instance Norm"), "PixelShuffle": ("PixelShuffle", "Upsample"),
               "SiLU": ("SiLU", "SiLU / Swish"), "Sigmoid": ("Sigmoid", "Sigmoid"), "Tanh": ("Tanh", "Tanh"),
               "LeakyReLU": ("Leaky ReLU", "Leaky ReLU"), "ELU": ("ELU", "ELU"), "Mish": ("Mish", "Mish"),
               "Softmax": ("Softmax", "Softmax"), "Dropout": ("Dropout", "Dropout"), "Dropout1d": ("Dropout", "Dropout"),
@@ -467,6 +519,7 @@ COLOR_HINTS = [  # (mots dans le nom de la classe, bloc de bibliothèque dont on
     (("encoder", "downsample", "downblock", "encod"), "Encoder"),
     (("bottleneck",), "Bottleneck"),
     (("basicblock", "residual", "resblock", "resnet"), "Conv 3×3"),
+    (("transformer", "swin"), "Encoder"),
     (("conv", "cnn"), "Conv1D"),
     (("norm",), "Layer Norm"),
     (("mlp", "feedforward", "ffn", "linear", "dense"), "MLP"),
@@ -475,8 +528,24 @@ COLOR_HINTS = [  # (mots dans le nom de la classe, bloc de bibliothèque dont on
     (("lstm", "gru", "rnn", "recurrent"), "LSTM"),
     (("generator",), "Generator"), (("discriminator",), "Discriminator"),
 ]
+RESIZE_TEXT = {"max_pool1d": ("Max Pooling", "Max Pooling"), "max_pool2d": ("Max Pooling", "Max Pooling"),
+               "avg_pool1d": ("Avg Pooling", "Avg Pooling"), "avg_pool2d": ("Avg Pooling", "Avg Pooling"),
+               "adaptive_avg_pool1d": ("Avg Pooling", "Avg Pooling"),
+               "adaptive_avg_pool2d": ("Avg Pooling", "Avg Pooling"),
+               "interpolate": ("Interpolate", "Upsample"), "upsample": ("Upsample", "Upsample"),
+               "pixel_shuffle": ("PixelShuffle", "Upsample")}
 OP_LIB = {"add": "op_plus", "sub": "op_minus", "mul": "op_times", "cat": "op_concat"}
 OP_TEXT = {"matmul": ("MatMul", "MatMul"), "attn": ("Scaled Dot-Product Attention", "Scaled Dot-Product Attention")}
+
+
+def builtin_chain(m):
+    """Sous-classe de Sequential faite de 2 à 4 couches de torch.nn : leurs libellés, ou None."""
+    if not isinstance(m, nn.Sequential):
+        return None
+    kids = [c for c in m.children() if type(c).__name__ not in REGULARIZERS]
+    if not 2 <= len(kids) <= 4 or not all(type(c).__module__.startswith("torch.nn") for c in kids):
+        return None
+    return [builtin_label(c) for c in kids]
 
 
 def user_color(cls, blocks):
@@ -508,6 +577,10 @@ def style_node(n, blocks, shapes):
     elif n.kind == "output":
         lines.append(n.label)
         d["lib"] = "Output"
+    elif n.kind == "noise":
+        lines.append("Noise ε ~ 𝒩(0, I)")
+        if "Noise" in blocks:
+            d["lib"] = "Noise"
     elif n.kind == "param":
         lines.append(n.label)
         d["color"] = blocks["Positional Encoding"].color if "pos" in n.label.lower() and "Positional Encoding" in blocks \
@@ -520,7 +593,9 @@ def style_node(n, blocks, shapes):
         elif n.op == "norm":
             txt, lib = n.label.replace("_", " ").title().replace(" ", ""), "Layer Norm"
         elif n.op == "resize":
-            lib = "Upsample"
+            txt, lib = RESIZE_TEXT.get(n.label, (txt, "Upsample"))
+            if n.label.startswith("adaptive") and n.out_shape and all(v == 1 for v in n.out_shape[2:]):
+                txt = "Global " + txt
         lines.append(txt)
         if lib in blocks:
             d["lib"] = lib
@@ -531,13 +606,22 @@ def style_node(n, blocks, shapes):
             lines.append(txt)
             if lib in blocks:
                 d["lib"] = lib
+            else:
+                d["color"] = user_color(n.cls, blocks)
         else:
-            lines.append(n.cls)
-            d["color"] = user_color(n.cls, blocks)
+            chain = builtin_chain(m)
+            if chain:                            # Conv2dNormActivation… : « Conv2d k3 s2 + BatchNorm + ReLU6 »
+                lines.append(" + ".join(t for t, _ in chain))
+                lib = chain[0][1]
+                if lib in blocks:
+                    d["lib"] = lib
+            else:
+                lines.append(n.cls)
+                d["color"] = user_color(n.cls, blocks)
     sl = shape_line(n, shapes) if n.kind not in ("op",) or n.op not in OP_LIB else ""
     if n.kind == "module" and n.cls == "Linear":
         sl = ""                                  # « Linear 512 → 1000 » dit déjà tout
-    if sl and n.kind != "param":
+    if sl and n.kind not in ("param", "noise"):
         lines.append(sl)
     d["text"] = "\n".join(lines)
     return d
@@ -783,6 +867,29 @@ def measure_sizes(g, styled):
     return sizes
 
 
+GENERIC_NAMES = {"n", "l", "ln", "bn", "gn", "norm", "conv", "fc", "lin", "linear", "act", "relu", "gelu",
+                 "drop", "dropout", "pool", "layer", "block", "proj", "mlp", "ff", "ffn", "attn", "attention",
+                 "dense", "up", "down", "out", "net", "model", "module", "head", "stem", "body"}
+
+
+def name_twins(g, styled):
+    """Blocs au texte identique (ex. deux « Linear 400 → 20 ») : le nom d'attribut (mu, logvar,
+    q_proj…) en première ligne, s'il dit quelque chose de plus que la classe."""
+    by_text = defaultdict(list)
+    for nid, n in g.nodes.items():
+        if n.kind == "module":
+            by_text[styled[nid]["text"]].append(nid)
+    for text, ids in by_text.items():
+        names = {nid: nid.split("#")[0].split(".")[-1] for nid in ids}
+        if len(set(names.values())) < 2:
+            continue
+        for nid, name in names.items():
+            core = name.strip("_").rstrip("0123456789").rstrip("_").lower()
+            if name.isdigit() or not core or core in GENERIC_NAMES or core == g.nodes[nid].cls.lower():
+                continue
+            styled[nid]["text"] = name + "\n" + text
+
+
 def _qt():
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from PyQt5.QtWidgets import QApplication
@@ -795,6 +902,7 @@ def build(g, title, shapes):
     CFG.load()
     blocks = CFG.blocks
     styled = {nid: style_node(n, blocks, shapes) for nid, n in g.nodes.items()}
+    name_twins(g, styled)
     sizes = measure_sizes(g, styled)
     lay = Layout(g, sizes)
     x, y = lay.run()
@@ -842,13 +950,15 @@ def build(g, title, shapes):
             continue
         fid = f"list:{q}"
         label = q.split(".")[-1].replace("_", " ")
+        if label.isdigit():
+            label = ""                             # features.3 : un numéro n'apprend rien
         # l'étiquette (en haut à gauche) ne doit pas passer sous la flèche qui entre au centre
         half = max(sizes[i][0] for i in ids) / 2 + 14.0
         if 10 + richtext.measure(label, 11)[0] > half - 6 and " " in label:
             label = label.replace(" ", "\n")
         nodes.append({"id": fid, "type": "group", "label": label,
                       "label_pos": "inside", "label_size": 11, "margin": 14.0,
-                      "margin_top": 30.0 + 13.0 * label.count("\n"),
+                      "margin_top": (30.0 + 13.0 * label.count("\n")) if label else 14.0,
                       "fill": "#F7F7F7", "children": kids})
         for k in kids:
             frame_of[k] = fid

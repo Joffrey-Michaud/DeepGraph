@@ -72,14 +72,22 @@ python …/depuis_pytorch.py torchvision.models:vit_b_16 -e image:1,3,224,224 -p
 
 - **Un bloc** = un module appelé pendant l'exécution. Texte : nom de la classe (ou réglages pour les
   modules de `torch.nn` : « Conv2d k3 s2 », « Linear 128 → 64 », « Multi-Head Attention (8 têtes) »),
-  puis les formes **sans la première dimension** (le batch).
+  puis les formes **sans la première dimension** (le batch). Une petite suite de couches de `torch.nn`
+  regroupées dans une classe (`Conv2dNormActivation`…) s'écrit « Conv2d k3 s2 + BatchNorm + ReLU6 ».
+  Quand deux blocs auraient le même texte, leur nom d'attribut s'ajoute en première ligne
+  (`mu` / `logvar`, `q_proj` / `k_proj`), sauf s'il est générique (`norm1`, `fc2`…).
 - **⊕ / concaténation / ⊗** : les `+`, `torch.cat`, `*` écrits dans un `forward` entre deux tenseurs.
-  `view`, `transpose`, `reshape`, `x * 0.5`… sont transparents (pas de bloc).
+  `view`, `transpose`, `reshape`, `x * 0.5`… sont transparents (pas de bloc), comme les modules
+  `Identity`, `Permute`, `Rearrange`…
+- **« Noise ε ~ 𝒩(0, I) »** : un tirage aléatoire (`torch.randn_like(mu)`, `torch.randn(…)`), dessiné comme
+  une source à part (l'astuce de reparamétrisation d'un VAE donne `logvar ⊗ bruit`, puis `⊕ mu`).
 - **Petit bloc gris à côté** : un paramètre utilisé directement (`pos_embedding`, `class_token`…).
 - **Cadre plein** (titre en haut à gauche) : une liste de modules nommée (`self.encoder = nn.ModuleList(…)`,
-  `nn.Sequential`) — son nom d'attribut sert de titre.
+  `nn.Sequential`) — son nom d'attribut sert de titre (pas de titre si c'est un numéro : `features.3`).
 - **Cadre pointillé** : un module dont on montre l'intérieur ; « 6× Block » s'il est répété.
 - **Cadre « N× » autour d'un bloc** : N blocs identiques (mêmes réglages) enchaînés.
+- **Sorties** : « Output », ou « Output 1, 2… » si le `forward` en rend plusieurs ; la clé quand il rend
+  un dictionnaire (`{"out": …}`).
 - **Forme en U** : choisie automatiquement quand de longues liaisons emboîtées relient le début et la
   fin du réseau (U-Net) ; les skip connections deviennent horizontales.
 - Chaque élément garde le **nom du module** d'origine (`encoder.conv1.0`) dans sa référence interne.
@@ -94,9 +102,12 @@ Les blocs et cadres se retouchent ensuite comme n'importe quel schéma : renomme
    chaque tenseur de qui le produit à qui l'utilise, on obtient le graphe exact.
    `torch.fx` n'est pas utilisé : il échoue dès qu'un `forward` contient une vérification
    (`if x.ndim != 3: raise …`).
-2. **Niveau de détail** : la hiérarchie de tes modules ; `ModuleList` et `Sequential` ne comptent pas
-   comme un niveau.
-3. **Factorisation** : deux blocs sont identiques si leur `repr()` (tous les réglages) l'est.
+2. **Niveau de détail** : la hiérarchie de tes modules ; `ModuleList`, `ModuleDict` et `Sequential` ne
+   comptent pas comme un niveau. Une classe qui en hérite (bloc dense de DenseNet,
+   `Conv2dNormActivation`) est un vrai module, avec son nom.
+3. **Factorisation** : deux blocs sont identiques s'ils ont la même classe, les mêmes réglages et les
+   mêmes sous-modules. Les taux de régularisation (`Dropout`, *stochastic depth*) ne comptent pas :
+   ils changent souvent d'un bloc à l'autre (Swin, ConvNeXt, EfficientNet).
 4. **Mise en page** : colonne principale = plus long chemin entrée → sortie ; repli en U si utile ;
    les autres chaînes forment des colonnes ; l'ordre des colonnes minimise les longueurs et les
    traversées ; les résiduelles passent par le côté ; le reste suit le tracé automatique des flèches.
