@@ -1064,3 +1064,93 @@ class DiagramScene(LayersMixin, QGraphicsScene):
         sel = self.selectedItems()
         if sel:
             self._insert(self.to_dict(sel), QPointF(20, 20))
+
+    # ------------------------------------------------------- insérer un schéma (modèles)
+    def insert_diagram(self, data, mode="layer", name="Modèle", center=None):
+        """Insère un schéma .dgraph dans le document, en une seule étape d'annulation : à droite du contenu
+        existant (sans le chevaucher), ou centré sur center si le document est vide.
+
+        mode « layer » : dans un nouveau calque nommé name, juste au-dessus du calque courant ; si le schéma
+        a plusieurs calques, un groupe de calques qui les reproduit (masqués et verrouillés compris).
+        mode « current » : dans le calque courant ; le contenu des calques masqués du schéma est laissé de côté.
+        Les réglages du schéma (police, épaisseurs) ne sont pas repris : le document garde les siens."""
+        from .simple_format import expand, migrate_font_sizes
+        data = migrate_font_sizes(expand(json.loads(json.dumps(data))))
+        nodes, arrows = data.get("nodes", []), data.get("arrows", [])
+        src = self._parse_tree(data.get("layers"), set())
+        src_leaves = [(n, anc) for n, _, anc in self._walk(src) if not n.get("group")]
+        if mode == "current":
+            hidden = {n["id"] for n, anc in src_leaves if not all(x["visible"] for x in anc + (n,))}
+            kept = set()
+            for d in nodes:                          # parents avant enfants (ordre du fichier)
+                par = d.get("parent")
+                if (par is None and d.get("layer") not in hidden) or (par is not None and par in kept):
+                    kept.add(d.get("uid"))
+            nodes = [d for d in nodes if d.get("uid") in kept]
+            arrows = [a for a in arrows if a.get("layer") not in hidden]
+            tgt = self.target_layer()
+            for d in nodes + arrows:
+                d["layer"] = tgt
+            new_current = self.current_layer
+        else:
+            nid = [self._next_lid()]
+            ids = {}
+
+            def clone(lst):
+                out = []
+                for n in lst:
+                    c = self._new_layer(nid[0], n["name"], bool(n.get("group")))
+                    nid[0] += 1
+                    c.update(visible=n["visible"], locked=n["locked"], opacity=n["opacity"])
+                    if n.get("group"):
+                        c["children"] = clone(n["children"])
+                    else:
+                        ids[n["id"]] = c["id"]
+                    out.append(c)
+                return out
+            if len(src_leaves) > 1:
+                node = self._new_layer(nid[0], name, group=True)
+                nid[0] += 1
+                node["children"] = clone(src)
+                fallback = ids[src_leaves[-1][0]["id"]]
+            else:
+                node = self._new_layer(nid[0], name)
+                fallback = node["id"]
+            cur, lst, _ = self.find_layer(self.current_layer)
+            if cur is None:
+                self.ltree.append(node)
+            else:
+                lst.insert(lst.index(cur) + 1, node)
+            for d in nodes + arrows:
+                d["layer"] = ids.get(d.get("layer"), fallback)
+            new_current = node["id"]
+        # placement : à droite de l'existant, sinon centré sur center
+        tops = [d for d in nodes if d.get("parent") is None and "x" in d and "y" in d]
+        offset = QPointF(0, 0)
+        existing = [n.scene_frame() for n in self.nodes() if n.parentItem() is None]
+        if tops:
+            x0 = min(d["x"] for d in tops)
+            y0 = min(d["y"] for d in tops)
+            x1 = max(d["x"] + float(d.get("w") or 0) for d in tops)
+            y1 = max(d["y"] + float(d.get("h") or 0) for d in tops)
+            if existing:
+                right = max(r.right() for r in existing)
+                top = min(r.top() for r in existing)
+                offset = QPointF(right + 80 - x0, top - y0)
+            elif center is not None:
+                offset = center - QPointF((x0 + x1) / 2, (y0 + y1) / 2)
+        self._linfo = None
+        self.current_layer = new_current
+        self.apply_layers()
+        self._loading = True                     # calques masqués / verrouillés du modèle : gardés tels quels
+        try:
+            created = self.from_dict({"nodes": nodes, "arrows": arrows}, offset, new_ids=True)
+        finally:
+            self._loading = False
+        self.clearSelection()
+        for c in created:
+            if (isinstance(c, ArrowItem) or c.parentItem() is None) and c.flags() & QGraphicsItem.ItemIsSelectable:
+                c.setSelected(True)
+        self._layers_done()                          # une seule étape d'annulation
+        self.currentLayerChanged.emit()
+        return created

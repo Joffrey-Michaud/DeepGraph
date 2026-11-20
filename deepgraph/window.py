@@ -262,6 +262,9 @@ class MainWindow(QMainWindow):
         self.templates_menu = m.addMenu("Modèles types")
         self.templates_menu.setToolTipsVisible(True)
         self.templates_menu.aboutToShow.connect(self._fill_templates_menu)
+        self.my_models_menu = m.addMenu("Mes modèles")
+        self.my_models_menu.setToolTipsVisible(True)
+        self.my_models_menu.aboutToShow.connect(self._fill_my_models_menu)
         for a in (self.a_save, self.a_save_as, None, self.a_export,
                   self.a_export_sel, self.a_png_transp, self.a_export_py, None, self.a_quit):
             m.addSeparator() if a is None else m.addAction(a)
@@ -733,7 +736,7 @@ class MainWindow(QMainWindow):
             for fn in sorted(os.listdir(d)):         # schémas ajoutés à la main dans modeles/
                 path = os.path.abspath(os.path.join(d, fn))
                 if fn.endswith(".dgraph") and path not in seen:
-                    out.append(("Mes modèles", os.path.splitext(fn)[0], path, ""))
+                    out.append(("Autres", os.path.splitext(fn)[0], path, ""))
         return out
 
     def _fill_templates_menu(self):
@@ -742,11 +745,7 @@ class MainWindow(QMainWindow):
         subs = {}
         for cat, title, path, ref in self._templates():
             sub = m if not cat else subs.get(cat) or subs.setdefault(cat, m.addMenu(cat))
-            a = sub.addAction(title)
-            if ref:
-                a.setToolTip(ref)
-                a.setStatusTip(ref)
-            a.triggered.connect(lambda checked=False, p=path, t=title: self.open_template(p, t))
+            self._model_submenu(sub, title, path, ref)
         if not subs and m.isEmpty():
             m.addAction("(aucun modèle)").setEnabled(False)
         m.addSeparator()
@@ -754,6 +753,167 @@ class MainWindow(QMainWindow):
         a.setToolTip("Tout fichier .dgraph déposé dans ce dossier apparaît dans ce menu")
         a.triggered.connect(lambda: (os.makedirs(self.TEMPLATES_DIR, exist_ok=True),
                                      QDesktopServices.openUrl(QUrl.fromLocalFile(self.TEMPLATES_DIR))))
+
+    def _model_submenu(self, parent, title, path, tip="", user=False):
+        """Sous-menu d'un modèle : l'ouvrir comme nouveau fichier, ou l'insérer dans le document."""
+        sub = parent.addMenu(title)
+        if tip:
+            sub.menuAction().setToolTip(tip)
+            sub.menuAction().setStatusTip(tip)
+        for label, mode, hint in (
+                ("Ouvrir dans un nouveau fichier", "new", "Le modèle s'ouvre comme un document sans titre"),
+                ("Insérer dans un nouveau calque", "layer",
+                 "Ajouté au document, dans un calque à son nom, au centre de la vue"),
+                ("Insérer dans le calque actuel", "current",
+                 "Ajouté au document, dans le calque sélectionné, au centre de la vue")):
+            a = sub.addAction(label)
+            a.setStatusTip(hint)
+            a.triggered.connect(lambda checked=False, p=path, t=title, md=mode: self.use_model(p, t, md))
+        if user:
+            sub.addSeparator()
+            sub.addAction("Renommer…").triggered.connect(lambda checked=False, p=path: self.rename_my_model(p))
+            sub.addAction("Supprimer de mes modèles…").triggered.connect(
+                lambda checked=False, p=path: self.delete_my_model(p))
+        return sub
+
+    def use_model(self, path, title, mode):
+        """mode « new » : nouveau document ; « layer » / « current » : insertion (Ctrl+Z pour annuler)."""
+        if mode == "new":
+            return self.open_template(path, title)
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            if data.get("format") != FORMAT:
+                raise ValueError("ce n'est pas un fichier DeepGraph")
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.critical(self, "Insertion impossible", f"{path}\n\n{e}")
+            return False
+        center = self.view.mapToScene(self.view.viewport().rect().center())
+        created = self.scene.insert_diagram(data, mode, title, center)
+        frames = [c.scene_frame() for c in created if isinstance(c, NodeItem) and c.parentItem() is None]
+        if frames:                                    # la vue suit le modèle inséré
+            r = frames[0]
+            for f in frames[1:]:
+                r = r.united(f)
+            self.view.centerOn(r.center())
+        where = "dans un nouveau calque" if mode == "layer" else "dans le calque actuel"
+        self.statusBar().showMessage(f"Modèle « {title} » inséré {where} ({len(created)} éléments, "
+                                     "sélectionnés) — Ctrl+Z pour annuler", 6000)
+        return True
+
+    # ------------------------------------------------------- mes modèles
+    MY_MODELS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "mes_modeles")
+
+    def _my_models(self):
+        """[(catégorie, titre, chemin)] : mes_modeles/*.dgraph, et un niveau de sous-dossiers (catégories)."""
+        d, out = self.MY_MODELS_DIR, []
+        if not os.path.isdir(d):
+            return out
+        for fn in sorted(os.listdir(d), key=str.lower):
+            path = os.path.join(d, fn)
+            if fn.endswith(".dgraph") and os.path.isfile(path):
+                out.append(("", os.path.splitext(fn)[0], path))
+            elif os.path.isdir(path) and not fn.startswith("."):
+                for g in sorted(os.listdir(path), key=str.lower):
+                    if g.endswith(".dgraph") and os.path.isfile(os.path.join(path, g)):
+                        out.append((fn, os.path.splitext(g)[0], os.path.join(path, g)))
+        return out
+
+    def _fill_my_models_menu(self):
+        m = self.my_models_menu
+        m.clear()
+        models = self._my_models()
+        subs = {}
+        for cat, title, path in sorted(models, key=lambda t: (t[0] == "", t[0].lower(), t[1].lower())):
+            sub = m if not cat else subs.get(cat) or subs.setdefault(cat, m.addMenu(cat))
+            self._model_submenu(sub, title, path, user=True)
+        if not models:
+            m.addAction("(vide : ajouter un schéma ci-dessous)").setEnabled(False)
+        m.addSeparator()
+        a = m.addAction("Ajouter le schéma à mes modèles…")
+        a.setStatusTip("Enregistre tout le schéma dans « Mes modèles »")
+        a.triggered.connect(lambda: self.add_to_my_models(selection=False))
+        a = m.addAction("Ajouter la sélection à mes modèles…")
+        a.setStatusTip("Enregistre seulement les éléments sélectionnés dans « Mes modèles »")
+        a.setEnabled(bool(self.scene.selectedItems()))
+        a.triggered.connect(lambda: self.add_to_my_models(selection=True))
+        m.addSeparator()
+        a = m.addAction("Ouvrir le dossier de mes modèles")
+        a.setToolTip("Un .dgraph déposé dans ce dossier (ou dans un sous-dossier = une catégorie) apparaît ici")
+        a.triggered.connect(lambda: (os.makedirs(self.MY_MODELS_DIR, exist_ok=True),
+                                     QDesktopServices.openUrl(QUrl.fromLocalFile(self.MY_MODELS_DIR))))
+
+    @staticmethod
+    def _clean_name(name):
+        """Nom saisi -> morceau de chemin sûr (« Catégorie/Nom » : un niveau de sous-dossier)."""
+        parts = []
+        for p in str(name).replace("\\", "/").split("/")[:2]:
+            p = "".join("-" if c in '<>:"|?*' or ord(c) < 32 else c for c in p).strip().strip(".")
+            if p:
+                parts.append(p)
+        return parts
+
+    def add_to_my_models(self, selection=False):
+        sel = self.scene.selectedItems() if selection else None
+        if selection and not sel:
+            QMessageBox.information(self, "Mes modèles", "Aucun élément sélectionné.")
+            return False
+        default = os.path.splitext(os.path.basename(self.current_file))[0] \
+            if self.current_file and not selection else "Mon modèle"
+        name, ok = QInputDialog.getText(self, "Ajouter à mes modèles",
+                                        "Nom du modèle (« Catégorie/Nom » pour le ranger dans un sous-menu) :",
+                                        text=default)
+        parts = self._clean_name(name) if ok else []
+        if not parts:
+            return False
+        folder = os.path.join(self.MY_MODELS_DIR, *parts[:-1])
+        path = os.path.join(folder, parts[-1] + ".dgraph")
+        if os.path.exists(path):
+            r = QMessageBox.question(self, "Mes modèles", f"« {parts[-1]} » existe déjà. Le remplacer ?",
+                                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if r != QMessageBox.Yes:
+                return False
+        self.scene.checkpoint()
+        data = self.scene.to_dict(sel) if selection else self.scene.to_dict()
+        data.setdefault("settings", self.scene.settings())
+        try:
+            os.makedirs(folder, exist_ok=True)
+            tmp = path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=1, ensure_ascii=False)
+            os.replace(tmp, path)
+        except OSError as e:
+            QMessageBox.critical(self, "Enregistrement impossible", str(e))
+            return False
+        what = "La sélection" if selection else "Le schéma"
+        self.statusBar().showMessage(f"{what} est dans Fichier > Mes modèles > {' > '.join(parts)}", 6000)
+        return True
+
+    def rename_my_model(self, path):
+        old = os.path.splitext(os.path.basename(path))[0]
+        name, ok = QInputDialog.getText(self, "Renommer le modèle", "Nouveau nom :", text=old)
+        parts = self._clean_name(name) if ok else []
+        if not parts or parts[-1] == old:
+            return False
+        new = os.path.join(os.path.dirname(path), parts[-1] + ".dgraph")
+        if os.path.exists(new):
+            QMessageBox.warning(self, "Mes modèles", f"« {parts[-1]} » existe déjà.")
+            return False
+        os.rename(path, new)
+        return True
+
+    def delete_my_model(self, path):
+        title = os.path.splitext(os.path.basename(path))[0]
+        r = QMessageBox.question(self, "Mes modèles", f"Supprimer « {title} » de mes modèles ?\n"
+                                 "Le fichier est effacé du dossier mes_modeles.",
+                                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if r != QMessageBox.Yes:
+            return False
+        os.remove(path)
+        folder = os.path.dirname(path)
+        if os.path.abspath(folder) != os.path.abspath(self.MY_MODELS_DIR) and not os.listdir(folder):
+            os.rmdir(folder)                          # catégorie vide
+        return True
 
     def open_template(self, path, title=None):
         """Ouvre un modèle comme un nouveau document sans titre (le modèle n'est jamais écrasé)."""

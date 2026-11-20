@@ -8,3 +8,4 @@ __pycache__/
 *.tmp-maj
 mes_blocs.yaml
 mes_blocs.yaml.tmp
+mes_modeles/
