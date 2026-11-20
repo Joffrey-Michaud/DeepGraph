@@ -573,7 +573,7 @@ class BlockItem(NodeItem):
         st = CFG.style
         painter.setRenderHint(QPainter.Antialiasing)
         r = float(st["corner_radius"])
-        border = QColor(st["border_color"])
+        border = ink(self, st["border_color"])   # contour sur le fond : clair en mode sombre
         fill = QColor(self.color)
         bw = self.eff_border()
         op0 = painter.opacity()                  # inclut l'opacité du calque
@@ -665,7 +665,7 @@ class OperatorItem(NodeItem):
         painter.setRenderHint(QPainter.Antialiasing)
         border = QColor(st["border_color"])
         bw = self.eff_border()
-        painter.setPen(QPen(border, bw))
+        painter.setPen(QPen(ink(self, border), bw))   # contour : clair en mode sombre
         painter.setBrush(QColor(self.color))
         r = self.rect()
         painter.drawEllipse(r)
