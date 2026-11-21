@@ -9,7 +9,35 @@ importe la classe, crée le modèle, l'exécute **une fois** sur des entrées al
 indiquée, et observe ce qui se passe. Aucun LLM, aucun accès réseau : la même commande redonne
 toujours le même schéma.
 
-## Démarrage rapide
+## Depuis l'éditeur
+
+**Fichier > Importer un modèle PyTorch…** ouvre une fenêtre qui fait tout ce que fait la ligne de
+commande ci-dessous :
+
+1. **Python** : l'interpréteur de l'environnement qui contient torch et les dépendances du modèle
+   (conda, venv…). Ce n'est pas forcément celui de DeepGraph : l'outil tourne dans un processus à
+   part, et une erreur dans le code du modèle ne ferme pas l'éditeur. « torch 2.5.1 » en vert à côté :
+   l'environnement convient.
+2. **Fichier ou module** : le `.py` qui définit le modèle (bouton « … »), ou un module importable
+   (`torchvision.models`). La **racine du projet** est devinée depuis le fichier (dossier parent qui
+   contient `.git`, `pyproject.toml`…), et la **classe** proposée est la dernière classe `nn.Module` du
+   fichier qu'aucune autre n'utilise. On peut aussi coller `models/unet.py:UNet` d'un coup.
+3. **Arguments (JSON)** : la signature du constructeur est rappelée dessous (lue dans le fichier, sans
+   l'exécuter).
+4. **Entrées du forward** : pré-remplies avec les noms des arguments du `forward` ; il reste à écrire
+   leur forme (`1,3,224,224`, ou `1x3x224x224`) et à choisir `long` pour des tokens.
+5. **Analyser le modèle** : crée le modèle (et l'exécute si les formes sont données) et liste ses
+   classes de blocs, avec leur nombre d'instances et le nombre de paramètres du modèle. Pour chaque
+   classe : **Encart** (`--detail`), et dans la **vue d'ensemble** : normal, déplier (`--deplier`) ou
+   replier (`--replier`). Une classe jamais appelée pendant l'exécution est en gris.
+6. **Importer** : le brouillon s'ouvre dans un nouveau document sans titre, ou dans un nouveau calque du
+   document actuel. La fenêtre reste ouverte : changer un réglage et réimporter.
+
+L'onglet **Commande équivalente** montre la ligne de commande correspondante (« Copier la commande »,
+pour un script ou un README) ; l'onglet **Journal**, les messages de l'outil (avertissements, erreur du
+`forward`). Les réglages de chaque modèle sont retenus d'une fois sur l'autre.
+
+## Démarrage rapide (ligne de commande)
 
 Dans un terminal, **depuis la racine de ton projet** (là d'où tu lances habituellement ton code),
 avec l'environnement Python qui contient torch :
@@ -40,6 +68,7 @@ Puis **Fichier > Ouvrir** `brouillon.dgraph` dans DeepGraph.
 | `--sans-repetitions` | ne regroupe pas les blocs identiques en « N× » |
 | `--resume graphe.json` | écrit aussi le graphe brut (nœuds, liaisons, formes), pour vérifier ce qui a été vu ou le donner à un LLM |
 | `-o fichier.dgraph` | fichier à écrire (obligatoire) |
+| `--classes` | n'écrit pas de schéma : liste en JSON les classes à proposer pour `--detail` / `--deplier` / `--replier` (nombre d'instances, niveau, appelée ou non si `-e` est donné), les arguments du constructeur et du `forward`, le nombre de paramètres. C'est ce qu'utilise « Analyser le modèle » |
 
 `python outils/depuis_pytorch.py -h` rappelle la liste.
 
@@ -126,8 +155,8 @@ entrée joue le rôle de Q ou de K).
 
 | message | solution |
 |---|---|
-| `ModuleNotFoundError: No module named 'models'` | lancer la commande depuis la racine du projet (le dossier qui contient `models/`) |
-| `PyTorch est nécessaire` | activer l'environnement qui contient torch |
+| `ModuleNotFoundError: No module named 'models'` | lancer la commande depuis la racine du projet (le dossier qui contient `models/`) ; dans la fenêtre : corriger « Racine du projet » |
+| `PyTorch est nécessaire`, « torch introuvable » | activer l'environnement qui contient torch ; dans la fenêtre : choisir son interpréteur (`…/envs/mon_env/bin/python`) |
 | `TypeError: __init__() missing … argument` | donner les arguments du constructeur avec `--args '{…}'` |
 | `Expected tensor … Long, Int` | l'entrée est un indice (tokens) : ajouter `:long` à `-e` |
 | erreur de forme dans le `forward` | vérifier l'ordre et la forme des `-e` (batch compris) |

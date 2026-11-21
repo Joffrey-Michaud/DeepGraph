@@ -1274,6 +1274,79 @@ def parse_input(s):
     return name or f"x{len(dims)}", t
 
 
+def _signature(fn, skip_self=False):
+    """[{name, default}] des paramètres nommables d'une fonction (pas *args / **kwargs)."""
+    import inspect
+    try:
+        sig = inspect.signature(fn)
+    except (TypeError, ValueError):
+        return None
+    out = []
+    for i, p in enumerate(sig.parameters.values()):
+        if skip_self and i == 0 and p.name == "self":
+            continue
+        if p.kind in (p.VAR_POSITIONAL, p.VAR_KEYWORD):
+            continue
+        d = None if p.default is p.empty else repr(p.default)
+        out.append({"name": p.name, "default": d if d is None or len(d) <= 40 else d[:37] + "..."})
+    return out
+
+
+def list_classes(spec, args_json, entries):
+    """Mode --classes : ce que l'éditeur propose pour --detail / --deplier / --replier (JSON).
+
+    Classes des sous-modules qui ont eux-mêmes des sous-modules (une Conv2d n'a pas d'intérieur à
+    montrer), dans l'ordre de définition, avec leur nombre d'instances et leur niveau (comme
+    --profondeur). Si des entrées sont données, le modèle est aussi exécuté une fois : chaque classe
+    dit si elle est appelée, et une erreur de forme se voit avant l'import."""
+    res = {"init": None, "forward": None, "classes": [], "params": None, "erreur": None, "erreur_forward": None}
+    try:
+        cls = load_class(spec)
+    except BaseException as e:  # noqa: BLE001  (SystemExit compris)
+        res["erreur"] = f"{type(e).__name__} : {e}"
+        return res
+    res["init"] = _signature(cls)
+    if isinstance(cls, type) and hasattr(cls, "forward"):
+        res["forward"] = _signature(cls.forward, skip_self=True)
+    try:
+        model = cls(**json.loads(args_json or "{}")).eval()
+    except BaseException as e:  # noqa: BLE001
+        res["erreur"] = f"{type(e).__name__} : {e}"
+        return res
+    res["forward"] = _signature(model.forward) or res["forward"]
+    res["params"] = sum(p.numel() for p in model.parameters())
+    info = Tracer(model).info
+    order, seen = [], {}
+    for m, (q, lv) in info.items():
+        if is_container(m) or not any(True for _ in m.children()):
+            continue
+        name = type(m).__name__
+        if name not in seen:
+            seen[name] = {"name": name, "count": 0, "level": lv, "called": None,
+                          "builtin": type(m).__module__.startswith("torch."), "example": q}
+            order.append(name)
+        c = seen[name]
+        c["count"] += 1
+        c["level"] = min(c["level"], lv)
+    if entries:
+        called = set()
+        hooks = [m.register_forward_pre_hook(lambda mod, a: called.add(type(mod).__name__))
+                 for m in info if type(m).__name__ in seen]
+        try:
+            inputs = [parse_input(s) for s in entries]
+            with torch.no_grad():
+                model(*[t for _, t in inputs])
+            for name in order:
+                seen[name]["called"] = name in called
+        except BaseException as e:  # noqa: BLE001
+            res["erreur_forward"] = f"{type(e).__name__} : {e}"
+        finally:
+            for h in hooks:
+                h.remove()
+    res["classes"] = [seen[n] for n in order]
+    return res
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("modele", help="fichier.py:Classe ou paquet.module:Classe")
@@ -1290,9 +1363,18 @@ def main(argv=None):
     ap.add_argument("--detail", action="append", default=[],
                     help="classe dont l'intérieur est dessiné en encart, à droite (répétable)")
     ap.add_argument("--resume", help="écrit aussi un résumé JSON du graphe (pour un LLM ou pour vérifier)")
-    ap.add_argument("-o", "--out", required=True, help="fichier .dgraph à écrire")
+    ap.add_argument("-o", "--out", help="fichier .dgraph à écrire (obligatoire sauf avec --classes)")
+    ap.add_argument("--classes", action="store_true",
+                    help="écrit en JSON (sortie standard) les classes du modèle à proposer pour --detail, "
+                         "--deplier, --replier, et les arguments du constructeur et du forward, puis s'arrête")
     a = ap.parse_args(argv)
     sys.path.insert(0, ROOT)
+    if a.classes:
+        json.dump(list_classes(a.modele, a.args, a.entree), sys.stdout, ensure_ascii=False)
+        print()
+        return
+    if not a.out:
+        ap.error("l'option -o fichier.dgraph est obligatoire")
 
     cls = load_class(a.modele)
     model = cls(**json.loads(a.args)).eval()

@@ -152,6 +152,9 @@ class MainWindow(QMainWindow):
                                   "Exporter tout le diagramme en PDF / SVG / PNG")
         self.a_export_sel = self._act("Exporter la sélection…", lambda: self.export(True), "Ctrl+Shift+E")
         self.a_png_transp = self._act("PNG : fond transparent", lambda on: None, checkable=True)
+        self.a_import_py = self._act("Importer un modèle PyTorch…", self.import_pytorch, None,
+                                     "Brouillon de schéma à partir du code d'un modèle PyTorch "
+                                     "(exécuté une fois sur des entrées aléatoires)")
         self.a_export_py = self._act("Exporter en code PyTorch…", self.export_pytorch, None,
                                      "Squelette de code PyTorch (nn.Module) qui suit le schéma")
         self.a_quit = self._act("Quitter", self.close, QKeySequence.Quit)
@@ -265,7 +268,7 @@ class MainWindow(QMainWindow):
         self.my_models_menu = m.addMenu("Mes modèles")
         self.my_models_menu.setToolTipsVisible(True)
         self.my_models_menu.aboutToShow.connect(self._fill_my_models_menu)
-        for a in (self.a_save, self.a_save_as, None, self.a_export,
+        for a in (self.a_import_py, None, self.a_save, self.a_save_as, None, self.a_export,
                   self.a_export_sel, self.a_png_transp, self.a_export_py, None, self.a_quit):
             m.addSeparator() if a is None else m.addAction(a)
         m = mb.addMenu("&Édition")
@@ -549,8 +552,8 @@ class MainWindow(QMainWindow):
     def show_pytorch_doc(self):
         tool = os.path.join(docs.ROOT, "outils", "depuis_pytorch.py")
         self._show_doc("_pytorch_doc", "Schéma depuis un modèle PyTorch", docs.pytorch_doc(),
-                       f"Commande à lancer dans un terminal, depuis la racine du projet du modèle : "
-                       f"python {tool} fichier.py:Classe -e x:1,3,224,224 -o brouillon.dgraph",
+                       f"Menu Fichier > Importer un modèle PyTorch…, ou dans un terminal, depuis la racine "
+                       f"du projet du modèle : python {tool} fichier.py:Classe -e x:1,3,224,224 -o brouillon.dgraph",
                        "DEPUIS_PYTORCH.md")
 
     def show_vers_pytorch_doc(self):
@@ -1076,6 +1079,16 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Export impossible", str(e))
             return
         self.statusBar().showMessage(f"Exporté : {path}", 5000)
+
+    def import_pytorch(self):
+        """Fenêtre d'import (deepgraph/pytorch_import.py, interface de outils/depuis_pytorch.py)."""
+        from .pytorch_import import PytorchImportDialog
+        dlg = getattr(self, "_import_dlg", None)
+        if dlg is None:
+            dlg = self._import_dlg = PytorchImportDialog(self)
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
 
     def export_pytorch(self):
         """Squelette PyTorch du schéma (deepgraph/codegen.py, voir docs/VERS_PYTORCH.md)."""

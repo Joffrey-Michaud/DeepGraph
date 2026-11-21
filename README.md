@@ -38,7 +38,7 @@ python main.py --update             # installe la dernière release
 | Mes modèles | **Fichier > Mes modèles** : ses propres schémas réutilisables, avec les trois mêmes façons de les ouvrir. **Ajouter le schéma à mes modèles…** ou **Ajouter la sélection à mes modèles…** : un nom et une **catégorie** (existante ou nouvelle), qui devient un sous-menu, comme pour les modèles types ; **Renommer ou changer de catégorie…** et **Supprimer** depuis le sous-menu du modèle. Insérés dans un nouveau calque, les calques du modèle sont reproduits (masqués et verrouillés compris) ; dans le calque actuel, le contenu de ses calques masqués est laissé de côté. Enregistrés dans `mes_modeles/` (un sous-dossier = une catégorie), que les mises à jour ne touchent pas |
 | Copier comme image | **Ctrl+Maj+C** (ou clic droit) : la sélection, ou tout le diagramme, dans le presse-papiers en PNG + SVG + PDF ; coller directement dans Word, LibreOffice, PowerPoint, Inkscape… (même échelle et même fond transparent que l'export PNG) |
 | Exporter | **Ctrl+E** → PDF / SVG / PNG ; **Ctrl+Maj+E** pour la sélection seule ; sans l'éditeur : `python outils/exporter.py` (voir plus bas) |
-| Code PyTorch | **Fichier > Exporter en code PyTorch…** : squelette `nn.Module` qui suit le schéma (voir plus bas) |
+| Code PyTorch | **Fichier > Importer un modèle PyTorch…** : brouillon de schéma depuis le code d'un modèle ; **Fichier > Exporter en code PyTorch…** : squelette `nn.Module` qui suit le schéma (voir plus bas) |
 | Police | barre d'outils « Police » (à côté de Bords / Flèches / Texte) : s'applique à tout le diagramme et aux exports, enregistrée dans le `.dgraph` ; « Défaut » = police de `blocks.yaml` ; « Autre police… » pour choisir parmi toutes les polices installées |
 | Épaisseurs | barre d'outils « Bords » / « Flèches » (tout le diagramme) ; par élément dans Propriétés, bouton « Défaut » pour revenir au global |
 | Blocs ajustés au texte | case de la barre d'outils (cochée pour les nouveaux diagrammes, décochée à l'ouverture d'un ancien fichier) : un bloc s'agrandit, en gardant son centre, dès que son texte déborderait (texte modifié, taille du texte, police) et ne peut pas être redimensionné plus petit que son texte. **Réduire aussi** (cochée par défaut) : quand le texte rétrécit, il revient vers sa taille d'origine (celle de la bibliothèque, ou la dernière taille donnée en le redimensionnant), jamais en dessous ; décochée, il ne fait que grandir. Clic droit > **Ajuster la taille au texte** (Ctrl+Maj+T) le met juste à la taille du texte |
@@ -89,9 +89,12 @@ démarrage tant qu'elle n'est pas installée) ; **Aide > Rechercher des mises à
 
 ## Brouillon depuis un modèle PyTorch (prototype)
 
-`python outils/depuis_pytorch.py models/mon_modele.py:MaClasse -e x:1,3,224,224 -o brouillon.dgraph` exécute
+**Fichier > Importer un modèle PyTorch…** (ou
+`python outils/depuis_pytorch.py models/mon_modele.py:MaClasse -e x:1,3,224,224 -o brouillon.dgraph`) exécute
 le modèle une fois et en dessine la structure (blocs, liaisons, formes, « N× », forme en U pour les U-Net),
-sans LLM. `--detail Classe` ajoute l'intérieur d'une classe en encart. Documentation complète :
+sans LLM. On choisit les blocs dont l'intérieur est dessiné en encart (`--detail Classe`). La fenêtre lance
+l'outil avec l'interpréteur Python de son choix (celui qui a torch), montre la commande équivalente et se
+souvient des réglages de chaque modèle. Documentation complète :
 **Aide > Schéma depuis un modèle PyTorch…** ou [docs/DEPUIS_PYTORCH.md](docs/DEPUIS_PYTORCH.md).
 
 ## Code PyTorch depuis un schéma (prototype)
