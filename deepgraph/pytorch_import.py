@@ -803,6 +803,8 @@ class PytorchImportDialog(QDialog):
     def _remember(self):
         st = self.state()
         self.settings.setValue(KEY_LAST, json.dumps(st, ensure_ascii=False))
+        if st["python"]:
+            self.settings.setValue("pytorch/python", st["python"])     # partagé avec Vérifier le schéma
         key = self.key()
         if key:
             models = self._saved_models()
@@ -829,7 +831,7 @@ class PytorchImportDialog(QDialog):
             st = json.loads(self.settings.value(KEY_LAST, "") or "{}")
         except ValueError:
             st = {}
-        self.e_python.setText(st.get("python") or sys.executable)
+        self.e_python.setText(st.get("python") or self.settings.value("pytorch/python", "") or sys.executable)
         self.e_cwd.setText(st.get("cwd", ""))
         self.e_model.setText(st.get("model", ""))
         i = self.c_dest.findData(st.get("dest", "new"))

@@ -39,6 +39,7 @@ python main.py --update             # installe la dernière release
 | Copier comme image | **Ctrl+Maj+C** (ou clic droit) : la sélection, ou tout le diagramme, dans le presse-papiers en PNG + SVG + PDF ; coller directement dans Word, LibreOffice, PowerPoint, Inkscape… (même échelle et même fond transparent que l'export PNG) |
 | Exporter | **Ctrl+E** → PDF / SVG / PNG ; **Ctrl+Maj+E** pour la sélection seule ; sans l'éditeur : `python outils/exporter.py` (voir plus bas) |
 | Code PyTorch | **Fichier > Importer un modèle PyTorch…** : brouillon de schéma depuis le code d'un modèle ; **Fichier > Exporter en code PyTorch…** : squelette `nn.Module` qui suit le schéma (voir plus bas) |
+| Vérifier le schéma | **Outils > Vérifier le schéma…** (F7) : forme des tenseurs de bloc en bloc, incohérences (⊕ entre 64 et 128 canaux, taille écrite fausse, Linear qui ne reçoit pas la bonne taille), et **écriture automatique des tailles** le long des flèches ou dans les blocs ; sans l'éditeur : `python outils/verifier_schema.py` |
 | Police | barre d'outils « Police » (à côté de Bords / Flèches / Texte) : s'applique à tout le diagramme et aux exports, enregistrée dans le `.dgraph` ; « Défaut » = police de `blocks.yaml` ; « Autre police… » pour choisir parmi toutes les polices installées |
 | Épaisseurs | barre d'outils « Bords » / « Flèches » (tout le diagramme) ; par élément dans Propriétés, bouton « Défaut » pour revenir au global |
 | Blocs ajustés au texte | case de la barre d'outils (cochée pour les nouveaux diagrammes, décochée à l'ouverture d'un ancien fichier) : un bloc s'agrandit, en gardant son centre, dès que son texte déborderait (texte modifié, taille du texte, police) et ne peut pas être redimensionné plus petit que son texte. **Réduire aussi** (cochée par défaut) : quand le texte rétrécit, il revient vers sa taille d'origine (celle de la bibliothèque, ou la dernière taille donnée en le redimensionnant), jamais en dessous ; décochée, il ne fait que grandir. Clic droit > **Ajuster la taille au texte** (Ctrl+Maj+T) le met juste à la taille du texte |
@@ -108,6 +109,12 @@ d'entrée est suivie de couche en couche ; ce que le schéma ne dit pas, ou ne p
 marqué `TODO`. Les 14 modèles types donnent un code qui s'exécute (LeNet-5, AlexNet, VGG-16, ResNet-18, SE-ResNet-50 :
 le nombre de paramètres de l'article). Documentation :
 **Aide > Code PyTorch depuis un schéma…** ou [docs/VERS_PYTORCH.md](docs/VERS_PYTORCH.md).
+
+Le même code sert à **vérifier un schéma** (**Outils > Vérifier le schéma…**, F7) : il est exécuté une
+fois (avec un Python qui a torch), chaque bloc note la forme de sa sortie, et la fenêtre signale les
+incohérences (formes incompatibles à un ⊕ ou une concaténation, taille écrite différente de la taille
+calculée…). Les formes peuvent ensuite être **écrites sur le schéma**, le long des flèches ou dans les
+blocs.
 
 ## Générer un schéma avec un LLM
 

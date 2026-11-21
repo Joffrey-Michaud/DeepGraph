@@ -80,7 +80,9 @@ Le titre en gras du schéma devient le nom de la classe : `ResNet-18` → `ResNe
   (`Bloc(64 if i == 0 else 128)`, `Bloc(64 + i * 32)` pour une croissance à la DenseNet).
 - Une taille impossible à déduire reçoit 64 et un `TODO`.
 - Convolution : padding « same » (`k // 2`, ou calculé à partir des formes si elles sont écrites).
-  Pooling sans pas indiqué : pas 2 pour un noyau 2×2, sinon pas 1.
+  Pooling sans pas indiqué : pas 2 pour un noyau 2×2, sinon pas 1. Pooling de noyau impair avec un pas
+  (`Max Pool 3×3, /2`) : padding `k // 2` (112 → 56, comme ResNet), sauf si les convolutions du schéma
+  sont sans padding.
 - Une `Linear` après des convolutions reçoit un `nn.Flatten()`, sauf si sa taille d'entrée est celle des
   canaux (`Linear 96 → 384` sur une image 96×56×56) : elle agit alors en chaque position et s'écrit
   `nn.Conv2d(96, 384, kernel_size=1)` (même calcul). Une `LayerNorm` sur une image normalise ses canaux
@@ -149,6 +151,46 @@ le nombre de paramètres du code obtenu, comparé au modèle d'origine :
 | U-Net, GPT, VAE, SE-Net, LSTM (petits modèles d'essai) | `--detail` des blocs répétés | identiques |
 
 Les petits écarts viennent des biais des convolutions, que le schéma n'indique pas.
+
+## Vérifier le schéma et écrire les tailles
+
+**Outils > Vérifier le schéma…** (F7) se sert du même code : le schéma est traduit, le code est exécuté
+une fois sur des entrées factices, et chaque bloc note la forme de sa sortie. Il faut un interpréteur
+Python qui a torch (le même que pour **Fichier > Importer un modèle PyTorch…**, champ « Python »).
+
+La fenêtre liste :
+
+| niveau | exemples |
+|---|---|
+| **Erreurs** | `⊕ : formes incompatibles : 128×32×32 et 64×32×32` ; concaténation de tailles différentes ; `« Linear » : reçoit 2048 valeurs, la couche en attend 4096` |
+| **Incohérences** | `« Conv 3×3, 32, /2 » : écrit 32×32×32, calculé 32×16×16` (ligne de formes du bloc, ou taille écrite à côté) ; `« Linear 4096 → 10 » : le schéma indique 4096 en entrée, le graphe en donne 2048` |
+| **Hypothèses** | tailles dont dépendent les formes : entrée sans taille écrite (`3 canaux, côtés 64×64 par défaut`), nombre de canaux absent, bloc non reconnu (sortie supposée de même forme) |
+
+Un clic sur une ligne sélectionne le bloc. **Écrire** ajoute les formes au schéma (Ctrl+Z pour annuler) :
+
+- **le long des flèches** : un petit texte gris à côté de chaque flèche (au-dessus d'un segment horizontal,
+  à droite d'un segment vertical ; à côté du bloc quand les blocs sont trop serrés). Sur une flèche qui
+  porte une opération (couleur expliquée par une légende : Max Pool, Up-conv), la forme qui arrive au bloc
+  suivant. Ces textes sont repérés : **Retirer** les enlève, une nouvelle écriture les remplace, et
+  l'export en code les ignore ;
+- **dans les blocs** : une dernière ligne de formes (`64×56×56`), comme l'import PyTorch.
+
+Les tailles déjà écrites par l'auteur à côté d'un bloc (`55×55×96`, `C1 : 6@28×28`) sont vérifiées, pas
+réécrites. Dans un bloc détaillé (cadre pointillé) appelé avec plusieurs tailles, les formes sont
+relatives à sa sortie : `C/4×H×W`, `C/16` (bloc SE). La dimension du batch n'est jamais écrite.
+
+Sans l'éditeur :
+
+```bash
+python outils/verifier_schema.py schema.dgraph                        # rapport
+python outils/verifier_schema.py schema.dgraph --ecrire fleches --png apercu.png
+python outils/verifier_schema.py schema.dgraph --python ~/envs/torch/bin/python --json
+```
+
+Les formes sont celles du code généré : elles suivent les mêmes conventions (padding « same », pooling
+3×3 /2 avec padding 1…). Une opération que le schéma ne dessine pas et qui change la taille (un pooling
+omis) donne donc des formes fausses ensuite ; les remises en forme (`view`, `transpose`, `flatten`) ne
+changent pas le nombre de valeurs et sont ajoutées par le générateur quand il les devine.
 
 ## Limites connues
 

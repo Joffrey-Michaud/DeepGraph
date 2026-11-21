@@ -155,6 +155,9 @@ class MainWindow(QMainWindow):
         self.a_import_py = self._act("Importer un modèle PyTorch…", self.import_pytorch, None,
                                      "Brouillon de schéma à partir du code d'un modèle PyTorch "
                                      "(exécuté une fois sur des entrées aléatoires)")
+        self.a_check = self._act("Vérifier le schéma…", self.check_diagram, "F7",
+                                 "Calcule la forme des tenseurs de bloc en bloc, signale les incohérences "
+                                 "(⊕ entre 64 et 128 canaux, taille écrite fausse…) et peut écrire les tailles")
         self.a_export_py = self._act("Exporter en code PyTorch…", self.export_pytorch, None,
                                      "Squelette de code PyTorch (nn.Module) qui suit le schéma")
         self.a_quit = self._act("Quitter", self.close, QKeySequence.Quit)
@@ -281,6 +284,8 @@ class MainWindow(QMainWindow):
         m.addSeparator()
         for a in self.a_styles:
             m.addAction(a)
+        m.addSeparator()
+        m.addAction(self.a_check)
         m = mb.addMenu("&Disposition")
         m.addAction(self.a_group)
         m.addAction(self.a_ungroup)
@@ -1079,6 +1084,17 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Export impossible", str(e))
             return
         self.statusBar().showMessage(f"Exporté : {path}", 5000)
+
+    def check_diagram(self):
+        """Fenêtre de vérification (deepgraph/check_dialog.py) ; lance la vérification à l'ouverture."""
+        from .check_dialog import CheckDialog
+        dlg = getattr(self, "_check_dlg", None)
+        if dlg is None:
+            dlg = self._check_dlg = CheckDialog(self)
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+        dlg.run()
 
     def import_pytorch(self):
         """Fenêtre d'import (deepgraph/pytorch_import.py, interface de outils/depuis_pytorch.py)."""

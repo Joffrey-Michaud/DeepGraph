@@ -400,6 +400,12 @@ def shape_line(line):
     return dims[0], dims[-1]
 
 
+def written_in(sh):
+    """Forme d'entrée écrite (« 3×224×224 → 64×112×112 ») ; None pour une forme seule (« 64×112×112 »),
+    qui est celle de la sortie (shape_line rend alors deux fois la même liste)."""
+    return None if not sh or sh[0] is sh[1] else sh[0]
+
+
 def split_shapes(text):
     """Texte d'un bloc -> (texte sans les lignes de formes, (forme d'entrée, forme de sortie) ou None)."""
     keep, shape = [], None
@@ -452,6 +458,7 @@ def parse_text(text):
     return specs, reps, chans
 
 
+SHAPE_LABEL_REF = "taille:"           # textes de tailles écrits par la vérification du schéma
 ANNOT = re.compile(r"^(?:[A-Za-z]\w{0,5}\s*:\s*)?(?:(\d+)\s*@\s*)?(\d+(?:\s*[×x*]\s*\d+){0,3})\s*(?:\((.*?)\))?$")
 
 
@@ -701,6 +708,7 @@ class Edge:
     port: int = 0             # sortie utilisée (1 = état d'un RNN)
     path: tuple = ()          # tracé (points absolus), coudes compris
     label: str = ""           # texte posé le long de la flèche (« skip », « K, V »)
+    arrow: object = None      # uid de la flèche du schéma (vérification : taille écrite sur la flèche)
 
 
 def arrow_path(a, sp, dp, first_side=None):
@@ -774,7 +782,8 @@ class DiagramGraph:
         self.nodes, self.edges, self.notes = {}, [], []
         self.legend = {}                         # (couleur, pointillés) -> texte de légende
         hidden = hidden_layers(data.get("layers") or [])     # calques masqués : ignorés
-        raw = [d for d in (data.get("nodes") or []) if isinstance(d, dict) and d.get("layer") not in hidden]
+        raw = [d for d in (data.get("nodes") or []) if isinstance(d, dict) and d.get("layer") not in hidden
+               and not str(d.get("ref") or "").startswith(SHAPE_LABEL_REF)]   # tailles écrites par la vérification
         arrows = [a for a in (data.get("arrows") or []) if isinstance(a, dict) and a.get("layer") not in hidden]
         kept = {d.get("uid", d.get("id")) for d in raw}
         arrows = [a for a in arrows if all(not isinstance(e, dict) or "node" not in e or e["node"] in kept
@@ -858,7 +867,7 @@ class DiagramGraph:
                 s = self._point(sp)
             if d is None:
                 d = self._point(dp)
-            self.edges.append(Edge(s, d, sp, dp, color, dashed, path=path))
+            self.edges.append(Edge(s, d, sp, dp, color, dashed, path=path, arrow=a.get("uid")))
 
         # légende : flèche entre deux points libres + texte juste à côté
         for sp, dp, color, dashed in free:
@@ -983,7 +992,7 @@ class DiagramGraph:
             par = self._common_parent(e.src, e.dst)
             mx, my = (e.sp[0] + e.dp[0]) / 2, (e.sp[1] + e.dp[1]) / 2
             self.nodes[uid] = Node(uid, "edgeop", mx, my, 0, 0, text=re.sub(r"\(.*?\)", "", text).strip(),
-                                   parent=par, data={"specs": specs, "to": e.dst})
+                                   parent=par, data={"specs": specs, "to": e.dst, "arrow": e.arrow})
             self.edges.append(Edge(uid, e.dst, (mx, my), e.dp, e.color, e.dashed, e.skip, label=e.label))
             e.dst, e.dp = uid, (mx, my)
 
@@ -1088,7 +1097,9 @@ class ClassCode:
 
 
 class Generator:
-    def __init__(self, data, user_defs=None, title=""):
+    def __init__(self, data, user_defs=None, title="", probes=False):
+        self.probes = probes         # sondes de formes (vérification du schéma, deepgraph/shapecheck.py)
+        self.node_info = {}          # uid -> {"todos": […], "stub": bool, "assumed": […]} (sondes)
         self.g = DiagramGraph(data)
         self.g.simplify()
         self.user_defs = user_defs or {}
@@ -1318,12 +1329,15 @@ class Generator:
                 "précédente : changer une taille de sortie demande de changer aussi l'entrée qui suit.",
                 "",
                 "Conventions : convolutions avec padding « same » (k // 2) ; pooling sans pas indiqué :",
-                "pas 2 pour un noyau 2×2, sinon pas 1 ; entrées d'une attention, de gauche à droite : V, K, Q."]
+                "pas 2 pour un noyau 2×2, sinon pas 1 ; pooling 3×3 /2 : padding 1 ; entrées d'une",
+                "attention, de gauche à droite : V, K, Q."]
         notes = [n for n in dict.fromkeys(self.notes) if n]
         if notes:
             head += ["", "Textes du schéma :"] + [f"  - {n}" for n in notes]
         out.append('"""' + "\n".join(head).replace('"""', "'''") + '\n"""')
         out.append("import math\n\nimport torch\nimport torch.nn as nn\nimport torch.nn.functional as F")
+        if self.probes:
+            out.append(PROBES.strip("\n"))
         for h in self.helpers:
             out.append(HELPERS[h].strip("\n"))
         for cc in self.classes:
@@ -1646,8 +1660,11 @@ class ClassBuilder:
             names[u] = nm
             self.values[(u, 0)] = Value(nm, meta, hint, is_input=True)
             self.forward_args.append(nm)
+            self.probe_out(u)
             if u not in self.ext_inputs:
                 self.inputs_spec.append((nm, meta[0], (u, n, meta)))
+        if self.gen.probes:
+            self.fwd.insert(0, f"_dg_call({self.name!r}, lambda: ({''.join(a + ', ' for a in self.forward_args)}))")
         returns = []
         for u in order:
             if u in names or self.g.nodes[u].data.get("absorbed"):
@@ -1658,7 +1675,10 @@ class ClassBuilder:
                 for v, e in ins:
                     returns.append((v, n))
                 continue
+            if self.gen.probes:
+                self.fwd.append(f"_dg_enter({u!r}, lambda: ({''.join(v.name + ', ' for v, _ in ins)}))")
             self.emit_node(u, ins)
+            self.probe_out(u)
         # sorties : blocs sans successeur qui produisent une valeur
         for u in order:
             n = g.nodes[u]
@@ -1697,6 +1717,29 @@ class ClassBuilder:
                        self.inputs_spec, in_params=in_idx, out_meta=self.out_meta)
         return cc
 
+    def probe_out(self, u):
+        """Sonde : forme de chaque sortie de u à l'exécution (vérification du schéma)."""
+        if not self.gen.probes:
+            return
+        n = self.g.nodes[u]
+        keys = [u]
+        if n.type == "sub":                  # cadre replié : sa sortie est celle du cadre et du dernier bloc
+            keys.append(n.data["group"])
+            keys += n.data.get("exits", [])
+        for (w, port), v in list(self.values.items()):
+            if w == u:
+                for k in dict.fromkeys(keys):
+                    self.fwd.append(f"_dg_out({k!r}, {port}, lambda: {v.name})")
+
+    def note(self, u, key, value):
+        """Information sur un nœud pour la vérification (TODO, bloc non reconnu, taille supposée)."""
+        if self.gen.probes and u is not None:
+            info = self.gen.node_info.setdefault(u, {})
+            if isinstance(value, list):
+                info.setdefault(key, []).extend(v for v in value if v not in info.get(key, []))
+            else:
+                info[key] = value
+
     def finish_returns(self, returns):
         if returns:
             self.out_meta = returns[0][0].meta
@@ -1719,6 +1762,8 @@ class ClassBuilder:
         com = ", ".join(lab for lab in labels if lab)
         if getattr(self, "kl_note", False):
             com = (com + " ; " if com else "") + f"{vals[-2]} et {vals[-1]} : pour la perte KL"
+        if self.gen.probes:
+            self.fwd.append(f"_dg_ret(lambda: ({''.join(v + ', ' for v in vals)}))")
         self.fwd.append(f"return {', '.join(vals)}" + (f"  # {com}" if com else ""))
 
     # ---------------------------------------------------------------- tri
@@ -2031,12 +2076,22 @@ class ClassBuilder:
         kind = meta[0]
         sh = split_shapes(n.text)[1]
         if kind == "tokens":
+            if not (sh and len(sh[1]) == 1) and self.kind == "main":
+                self.note(u, "assumed", ["longueur 16"])
             return f"(1, {sh[1][0]})" if sh and len(sh[1]) == 1 else "(1, 16)"
         if kind == "seq":
             feat = meta[1] if meta[1] is not None else "d_model"
             t = sh[1][0] if sh and len(sh[1]) == 2 else 16
+            if not (sh and len(sh[1]) == 2) and self.kind == "main":
+                self.note(u, "assumed", ["longueur 16"])
             return f"(1, {t}, {self.params.get(feat, feat if str(feat).isdigit() else 64)})"
-        c, hw, _, _ = self.input_dims(u, n, kind if kind and kind.startswith("img") else "vec")
+        c, hw, c_text, hw_text = self.input_dims(u, n, kind if kind and kind.startswith("img") else "vec")
+        if self.kind != "main":
+            c_text = hw_text = True                    # entrée d'un bloc : sa taille vient de l'appel
+        if not c_text:
+            self.note(u, "assumed", [f"{c} canaux" if kind and kind.startswith("img") else f"taille {c}"])
+        if kind and kind.startswith("img") and not hw_text:
+            self.note(u, "assumed", ["côtés " + "×".join(map(str, hw))])
         if kind and kind.startswith("img"):
             return "(" + ", ".join(map(str, (1, c) + tuple(hw))) + ")"
         return f"(1, {c})"
@@ -2094,6 +2149,7 @@ class ClassBuilder:
         g.nodes[uid] = sub
         in_edges = [e for u in inner for e in g.ins(u) if e.src not in S]
         out_edges = [e for u in inner for e in g.outs(u) if e.dst not in S]
+        sub.data["exits"] = list(dict.fromkeys(e.src for e in out_edges))
         # sous-classe (cadre répété contenant plusieurs nœuds) : entrées -> points virtuels
         single = repeat is not None and len([u for u in inner if g.nodes[u].type in ("block", "operator",
                                                                                       "edgeop", "sub")]) == 1
@@ -2496,10 +2552,11 @@ class ClassBuilder:
                 ctors.extend(c)
                 todos.extend(t)
         sh = specs[0].p.get("_shape") if specs else None
-        if sh:
+        bad = any(s.p.get("_bad") for s in specs)
+        if sh and not bad:
             meta = self.shape_meta(meta, sh[1])
         a = next((s.p["_annot"] for s in specs if "_annot" in s.p), None)
-        if a is not None and meta[0] and meta[0].startswith("img") and not strided:
+        if a is not None and meta[0] and meta[0].startswith("img") and not strided and not bad:
             hw = annot_split(a, meta[0], meta[1])[1]
             if hw and len(hw) == int(meta[0][3]):
                 meta = (meta[0], meta[1], Spatial(tuple(hw)))
@@ -2526,6 +2583,8 @@ class ClassBuilder:
         return att
 
     def add_init(self, att, ctor, n, todos):
+        if todos and n is not None:
+            self.note(n.uid, "todos", list(todos))
         com = self.comment(n)
         lines = ctor.split("\n")
         first = f"self.{att} = {lines[0]}"
@@ -2631,7 +2690,8 @@ class ClassBuilder:
 
         def channels_in():
             """Canaux d'entrée : suivis le long du graphe, sinon lus dans la ligne de formes."""
-            shown = sh[0][0] if sh and len(sh[0]) > 1 else None
+            win = written_in(sh)
+            shown = win[0] if win and len(win) > 1 else None
             if feat is not None and shown is not None and str(feat).isdigit() and int(feat) != shown:
                 todos.append(f"le schéma indique {shown} canaux d'entrée")
             return self.in_size(feat if feat is not None else shown, todos)
@@ -2645,19 +2705,37 @@ class ClassBuilder:
             hw = annot_split(annot, img or "img2d", chans_out)[1]
             return hw if hw and (sp is None or len(hw) == len(sp.dims)) else None
 
+        bad = []                                   # taille écrite impossible (« /2 » mais même taille)
+
         def exact_pad(ks, st, chans_out=None):
-            if sh and len(sh[0]) > 1 and len(sh[1]) > 1 and isinstance(st, int) and isinstance(ks, int):
-                return max(0, -(-((sh[1][-1] - 1) * st + ks - sh[0][-1]) // 2))
-            hw = annot_hw(chans_out)
-            if hw and sp is not None and isinstance(st, int) and isinstance(ks, int):
-                return max(0, -(-((hw[-1] - 1) * st + ks - sp.dims[-1]) // 2))
-            return None
+            pad, written = None, None
+            # « 3×224×224 → 64×112×112 » : entrée écrite ; « 64×112×112 » seule : entrée suivie
+            win = written_in(sh)
+            src = win[-1] if win and len(win) > 1 else (sp.dims[-1] if sp else None)
+            if sh and len(sh[1]) > 1 and src is not None and isinstance(st, int) and isinstance(ks, int):
+                pad, written = max(0, -(-((sh[1][-1] - 1) * st + ks - src) // 2)), sh[1][1:]
+            else:
+                hw = annot_hw(chans_out)
+                if hw and sp is not None and isinstance(st, int) and isinstance(ks, int):
+                    pad, written = max(0, -(-((hw[-1] - 1) * st + ks - sp.dims[-1]) // 2)), hw
+            if pad is not None and pad > ks // 2:
+                bad.append(True)
+                p["_bad"] = True                    # la forme écrite n'est pas suivie (run_specs)
+                todos.append(f"le schéma indique une sortie {'×'.join(map(str, written))}, impossible avec "
+                             f"un noyau {ks} et un pas {st} : padding {ks // 2} utilisé")
+                return None
+            return pad
 
         if k == "conv":
             d = p.get("dim") or dim
             ks = p.get("k") or (2 if p.get("transposed") else 3)
             out = out_size(64, "le nombre de canaux")
             st = p.get("stride") or (ks if p.get("transposed") else 1)
+            win = written_in(sh)
+            if not p.get("stride") and not p.get("transposed") and not stride_param and win and len(win) > 1 \
+                    and len(sh[1]) > 1 and sh[1][-1] and win[-1] > sh[1][-1] and win[-1] % sh[1][-1] == 0:
+                st = win[-1] // sh[1][-1]              # « 3×224×224 → 96×56×56 » : pas 4 (souche de ConvNeXt)
+                todos.append(f"pas {st} déduit des formes écrites")
             stv = stride_param or (str(st) if st != 1 else None)
             cin = channels_in()
             run_st = st if not stride_param else None          # pas en paramètre : taille non suivie
@@ -2688,7 +2766,9 @@ class ClassBuilder:
                 else:
                     c = f"nn.Conv{d}d({', '.join([cin, out] + args)})"
                 nsp = conv_dims(sp, ks, run_st, pad, guessed=guessed)
-            if sh and len(sh[1]) > 1:
+            if bad:
+                pass
+            elif sh and len(sh[1]) > 1:
                 nsp = Spatial(tuple(sh[1][1:]))
             elif annot_hw(out) and not stride_param:
                 nsp = Spatial(tuple(annot_hw(out)))
@@ -2705,11 +2785,19 @@ class ClassBuilder:
             pad = exact_pad(ks, st, feat)
             guessed = pad is None and isinstance(ks, int) and isinstance(st, int) and ks > st
             if pad is None:
-                pad = ks // 2 if st == 1 and not stride_param else 0
+                same = self.pad_votes["valid"] <= self.pad_votes["same"]
+                if st == 1 and not stride_param:
+                    pad = ks // 2
+                elif same and isinstance(ks, int) and isinstance(st, int) and ks % 2 and ks > st:
+                    pad = ks // 2                       # Max Pool 3×3 /2 : 112 -> 56 (ResNet, DenseNet…)
+                else:
+                    pad = 0
             if pad:
                 args.append(f"padding={pad}")
             nsp = conv_dims(sp, ks, st if not stride_param else None, pad, guessed=guessed)
-            if sh and len(sh[1]) > 1:
+            if bad:
+                pass
+            elif sh and len(sh[1]) > 1:
                 nsp = Spatial(tuple(sh[1][1:]))
             elif annot_hw(feat) and not stride_param:
                 nsp = Spatial(tuple(annot_hw(feat)))
@@ -2775,16 +2863,20 @@ class ClassBuilder:
             pre = []
             if img:
                 pre = ["nn.Flatten()"]
-                if sh and len(sh[0]) == 1:
-                    fin = str(sh[0][0])
-                elif sh and len(sh[0]) > 1:
-                    fin = " * ".join(map(str, sh[0]))
+                win = written_in(sh)
+                if win and len(win) == 1:
+                    fin = str(win[0])
+                elif win and len(win) > 1:
+                    fin = " * ".join(map(str, win))
                 else:
                     fin = self.flat_size(feat, sp, todos)
                 kind = "vec"
             else:
-                fin = feat if feat is not None else (str(sh[0][-1]) if sh else None)
+                fin = feat if feat is not None else (str(written_in(sh)[-1]) if written_in(sh) else None)
             fin = self.in_size(fin, todos, kind, "la taille d'entrée")
+            got = subst(fin, {})
+            if isinstance(p.get("in"), int) and str(got).isdigit() and int(got) != p["in"]:
+                todos.append(f"le schéma indique {p['in']} en entrée, le graphe en donne {got}")
             if k == "head":
                 nm = "vocab_size" if "vocab_size" in self.params else "num_classes"
                 if kind == "seq":
@@ -3138,6 +3230,7 @@ class ClassBuilder:
                 return self.emit_module(u, ins, f"{cname}({cin}, {b}" + (f", stride={st}" if st > 1 else "") + ")",
                                         snake(cname), (kind, str(b), sp), todos=todos)
         cname = self.gen.stub_class(n.text, len(ins))
+        self.note(u, "stub", True)
         return self.emit_module(u, ins, f"{cname}()", snake(cname), v0.meta, todos=todos)
 
     def defref_ctor(self, u, key):
@@ -3263,6 +3356,8 @@ class ClassBuilder:
                         return self.emit_repeat_single(u, ins, c_uid, sp[0][0] if sp and self.role(c_uid) == "layer"
                                                        else Spec("stub"))
 
+            ends = []                                     # sondes : indice du dernier module de chaque bloc
+
             def one_pass(m):
                 cs, ts = [], []
                 for c_uid in chain:
@@ -3271,6 +3366,7 @@ class ClassBuilder:
                                              "stride" if c_uid in self.stride_nodes and mode == "seq" else None)
                     cs.extend(c)
                     ts.extend(t)
+                    ends.append((c_uid, len(cs) - 1))
                 return cs, m, ts
 
             ctors, meta1, todos = one_pass(meta)
@@ -3310,6 +3406,11 @@ class ClassBuilder:
                     (" — TODO : " + self.init[-1].split("TODO : ", 1)[1] if "TODO : " in self.init[-1] else "")
             elif not group_name(n.label):
                 self.init[-len(ctor.split("\n"))] = f"self.{att} = nn.Sequential({com}"
+            if self.gen.probes and mode == "seq" and len(ctors) > 1:
+                for c_uid, i in ends[:len(chain)]:
+                    self.init.append(f"_dg_hook(self.{att}[{i}], {c_uid!r})")
+            elif self.gen.probes and mode == "single":
+                n.data["exits"] = list(dict.fromkeys(n.data.get("exits", []) + list(chain)))
             out = self.out_value(u, ins if len(ins) == 1 else [], meta, hint=hint)
             self.fwd.append(f"{out.name} = self.{att}({x}){com}")
             return
@@ -3470,6 +3571,54 @@ class ClassBuilder:
             order.append("C")
         self.def_symbols = set(order)
         self.def_symbol_order = order
+
+
+PROBES = '''
+_DG = {"calls": [], "stack": [], "loose": {}, "cur": None, "ins": None}
+
+
+def _dg_shape(x):
+    if isinstance(x, torch.Tensor):
+        return list(x.shape)
+    if isinstance(x, (tuple, list)):
+        return [_dg_shape(v) for v in x]
+    return None
+
+
+def _dg_enter(uid, get):
+    _DG["cur"] = uid
+    try:
+        _DG["ins"] = [_dg_shape(x) for x in get()]
+    except Exception:  # noqa: BLE001
+        _DG["ins"] = None
+    if _DG["stack"]:
+        _DG["calls"][_DG["stack"][-1]].setdefault("node_ins", {})[str(uid)] = _DG["ins"]
+
+
+def _dg_call(cls, get):
+    _DG["calls"].append({"cls": cls, "ins": _dg_shape(list(get())), "outs": None, "nodes": {}})
+    _DG["stack"].append(len(_DG["calls"]) - 1)
+
+
+def _dg_ret(get):
+    if _DG["stack"]:
+        _DG["calls"][_DG["stack"].pop()]["outs"] = _dg_shape(list(get()))
+
+
+def _dg_out(uid, port, get):
+    try:
+        sh = _dg_shape(get())
+    except Exception:  # noqa: BLE001
+        return
+    if _DG["stack"]:
+        _DG["calls"][_DG["stack"][-1]]["nodes"][f"{uid}|{port}"] = sh
+    else:
+        _DG["loose"].setdefault(f"{uid}|{port}", []).append(sh)
+
+
+def _dg_hook(mod, uid):
+    mod.register_forward_hook(lambda m, i, o: _dg_out(uid, 0, lambda: o))
+'''
 
 
 def generate(data, user_defs=None, title=""):
