@@ -22,6 +22,7 @@ import keyword
 import re
 import unicodedata
 from dataclasses import dataclass, field, replace
+from functools import lru_cache
 
 # ============================================================================ textes
 
@@ -62,6 +63,11 @@ def tex(s):
 
 def plain(s):
     """Texte affiché -> texte ASCII approché (formules, grec translittéré, indices, sans accents)."""
+    return _plain(s or "")
+
+
+@lru_cache(maxsize=4096)          # mêmes textes de blocs convertis des milliers de fois par génération
+def _plain(s):
     s = tex(s).translate(SUBSUP)
     s = LATEX.sub("", s).replace("\\", "")
     s = "".join(GREEK.get(c, c) for c in s)
@@ -73,6 +79,7 @@ def first_line(s):
     return (s or "").strip().split("\n")[0].strip()
 
 
+@lru_cache(maxsize=4096)
 def norm_key(s):
     """Clé de comparaison de titres : « Scaled Dot-Product\\nAttention » == « scaled dot product attention »."""
     return " ".join(re.findall(r"[a-z0-9]+", plain(s).lower()))
@@ -1442,14 +1449,6 @@ class ChannelLayerNorm(nn.Module):
 
 
 # ============================================================================ une classe
-
-@dataclass
-class Op:
-    node: object
-    inputs: list                      # [(Value, Edge)]
-    lines: list = field(default_factory=list)
-    outs: list = field(default_factory=list)
-
 
 class ClassBuilder:
     def __init__(self, gen, comp, name, kind, doc, root_group, strided, ext_inputs, users=None):

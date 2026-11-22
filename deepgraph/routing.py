@@ -6,6 +6,7 @@ est cherché sur cette grille irrégulière, chaque virage coûtant une pénalit
 tracés avec peu de coudes, à distance des blocs.
 """
 import heapq
+from bisect import bisect_left, bisect_right
 
 from PyQt5.QtCore import QPointF
 
@@ -20,10 +21,25 @@ def _uniq(vals):
     return out
 
 
-def route(p1, d1, p2, d2, rects, margin=12.0, bend=None, window=260.0):
-    """Polyligne orthogonale de p1 à p2 (QPointF) évitant les rectangles (QRectF, déjà sans les
-    extrémités qu'on traverse). d1 / d2 : direction de sortie de chaque ancre ("up", … ou None).
-    Renvoie None si aucun chemin n'est trouvé."""
+WINDOW = 260.0
+
+
+def as_tuple(r):
+    """QRectF ou (gauche, haut, droite, bas) -> (gauche, haut, droite, bas)."""
+    return r if isinstance(r, tuple) else (r.left(), r.top(), r.right(), r.bottom())
+
+
+def nearby(rects, x1, y1, x2, y2, window=WINDOW):
+    """Obstacles (gauche, haut, droite, bas) assez proches du segment p1-p2 pour compter."""
+    lo_x, hi_x = min(x1, x2) - window, max(x1, x2) + window
+    lo_y, hi_y = min(y1, y2) - window, max(y1, y2) + window
+    return [r for r in rects if not (r[2] < lo_x or r[0] > hi_x or r[3] < lo_y or r[1] > hi_y)]
+
+
+def route(p1, d1, p2, d2, rects, margin=12.0, bend=None, window=WINDOW):
+    """Polyligne orthogonale de p1 à p2 (QPointF) évitant les rectangles (QRectF ou tuples
+    (gauche, haut, droite, bas), déjà sans les extrémités qu'on traverse). d1 / d2 : direction de
+    sortie de chaque ancre ("up", … ou None). Renvoie None si aucun chemin n'est trouvé."""
     bend = 3.0 * margin if bend is None else bend
     x1, y1, x2, y2 = p1.x(), p1.y(), p2.x(), p2.y()
 
@@ -35,14 +51,9 @@ def route(p1, d1, p2, d2, rects, margin=12.0, bend=None, window=260.0):
 
     s = port(x1, y1, d1)
     t = port(x2, y2, d2)
-    # seuls les obstacles proches comptent
-    lo_x, hi_x = min(x1, x2) - window, max(x1, x2) + window
-    lo_y, hi_y = min(y1, y2) - window, max(y1, y2) + window
     obs = []
-    for r in rects:
-        if r.right() < lo_x or r.left() > hi_x or r.bottom() < lo_y or r.top() > hi_y:
-            continue
-        o = (r.left() - margin, r.top() - margin, r.right() + margin, r.bottom() + margin)
+    for r in nearby([as_tuple(r) for r in rects], x1, y1, x2, y2, window):   # seuls les obstacles proches comptent
+        o = (r[0] - margin, r[1] - margin, r[2] + margin, r[3] + margin)
         if any(o[0] < q[0] < o[2] and o[1] < q[1] < o[3] for q in (s, t)):
             continue             # extrémité collée à un obstacle : sinon elle serait enfermée
         obs.append(o)
@@ -62,12 +73,6 @@ def route(p1, d1, p2, d2, rects, margin=12.0, bend=None, window=260.0):
     ys.append(max(ys) + margin * 2)
     xs, ys = _uniq(xs), _uniq(ys)
 
-    def inside(x, y):
-        for (l, tp, r, b) in obs:
-            if l + 1e-6 < x < r - 1e-6 and tp + 1e-6 < y < b - 1e-6:
-                return True
-        return False
-
     def nearest(vals, v):
         return min(range(len(vals)), key=lambda i: abs(vals[i] - v))
 
@@ -79,13 +84,34 @@ def route(p1, d1, p2, d2, rects, margin=12.0, bend=None, window=260.0):
         want_end = (-dx, -dy)
     start_dir = DIRS.get(d1)
 
-    blocked = {}
+    # points de la grille et milieux d'arêtes strictement dans un obstacle, calculés d'un coup :
+    # xs, ys (et leurs milieux) sont triés, donc les indices dans un obstacle forment un intervalle
+    nx, ny = len(xs), len(ys)
+    mxs = [(a + b) / 2 for a, b in zip(xs, xs[1:])]     # milieu de l'arête (i, j) - (i + 1, j)
+    mys = [(a + b) / 2 for a, b in zip(ys, ys[1:])]     # milieu de l'arête (i, j) - (i, j + 1)
+    node_in = [[False] * ny for _ in range(nx)]
+    hedge_in = [[False] * ny for _ in range(nx - 1)]
+    vedge_in = [[False] * (ny - 1) for _ in range(nx)]
 
-    def free(i, j):
-        k = (i, j)
-        if k not in blocked:
-            blocked[k] = inside(xs[i], ys[j]) and k not in ((si, sj), (ti, tj))
-        return not blocked[k]
+    def span(vals, lo, hi):               # indices k tels que lo < vals[k] < hi
+        return range(bisect_right(vals, lo), bisect_left(vals, hi))
+
+    for (l, tp, r, b) in obs:
+        lo_x, hi_x, lo_y, hi_y = l + 1e-6, r - 1e-6, tp + 1e-6, b - 1e-6
+        ix, jy = span(xs, lo_x, hi_x), span(ys, lo_y, hi_y)
+        for grid, ii, jj in ((node_in, ix, jy), (hedge_in, span(mxs, lo_x, hi_x), jy),
+                             (vedge_in, ix, span(mys, lo_y, hi_y))):
+            for i in ii:
+                col = grid[i]
+                for j in jj:
+                    col[j] = True
+    for k in ((si, sj), (ti, tj)):        # départ et arrivée toujours libres
+        node_in[k[0]][k[1]] = False
+
+    def crosses(i, j, ni, nj):            # même milieu dans les deux sens : (a + b) / 2 == (b + a) / 2
+        if nj == j:
+            return hedge_in[min(i, ni)][j]
+        return vedge_in[i][min(j, nj)]
 
     def h(i, j):
         return abs(xs[i] - xs[ti]) + abs(ys[j] - ys[tj])
@@ -107,10 +133,9 @@ def route(p1, d1, p2, d2, rects, margin=12.0, bend=None, window=260.0):
             if d is not None and nd == (-d[0], -d[1]):
                 continue                     # pas de demi-tour
             ni, nj = i + nd[0], j + nd[1]
-            if not (0 <= ni < len(xs) and 0 <= nj < len(ys)) or not free(ni, nj):
+            if not (0 <= ni < nx and 0 <= nj < ny) or node_in[ni][nj]:
                 continue
-            mx, my = (xs[i] + xs[ni]) / 2, (ys[j] + ys[nj]) / 2
-            if inside(mx, my):
+            if crosses(i, j, ni, nj):
                 continue
             cost = g + abs(xs[ni] - xs[i]) + abs(ys[nj] - ys[j])
             if d is not None and nd != d:

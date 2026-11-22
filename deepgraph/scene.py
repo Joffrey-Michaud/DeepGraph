@@ -1,5 +1,7 @@
 """Scène : modes d'édition, flèches, groupes, alignement, copier/coller, annuler, sérialisation."""
 import json
+import zlib
+from contextlib import contextmanager
 
 from PyQt5.QtCore import Qt, QLineF, QPointF, QRectF, QMimeData, pyqtSignal
 from PyQt5.QtGui import QColor, QPen, QPainter
@@ -11,6 +13,7 @@ from .items import (NodeItem, BlockItem, OperatorItem, TextItem, JunctionItem, G
 from .layer_model import CLIP_MIME, LayersMixin
 from .arrow import (ArrowItem, Endpoint, style_from_polyline, project_on_segment,
                     heads_split, heads_join, simplify, STYLES)
+from .routing import as_tuple
 
 FORMAT = "deepgraph"
 
@@ -54,6 +57,9 @@ class DiagramScene(LayersMixin, QGraphicsScene):
         self._temp = None
         self._hover = None
         self._paste_n = 0
+        self._pending_arrows = None   # lot en cours : flèches à recalculer à la fin (deferred_arrows)
+        self._obstacles = None        # obstacles figés pendant un recalcul de flèches
+        self.route_cache = {}         # tracés automatiques déjà calculés, par extrémités et obstacles proches
         self._undo, self._undo_i = [], -1
         self.checkpoint()
 
@@ -67,6 +73,43 @@ class DiagramScene(LayersMixin, QGraphicsScene):
 
     def arrows(self):
         return [i for i in self.items() if isinstance(i, ArrowItem) and i is not self._temp]
+
+    def route_obstacles(self):
+        """(élément, (gauche, haut, droite, bas)) des blocs et opérateurs visibles, que contournent
+        les flèches automatiques."""
+        if self._obstacles is not None:
+            return self._obstacles
+        return [(n, as_tuple(n.scene_frame())) for n in self.nodes()
+                if isinstance(n, (BlockItem, OperatorItem)) and n.isVisible()]
+
+    @contextmanager
+    def _frozen_obstacles(self):
+        """Aucun élément ne bouge pendant le bloc : obstacles calculés une fois pour toutes les flèches."""
+        if self._obstacles is not None:
+            yield
+            return
+        self._obstacles = self.route_obstacles()
+        try:
+            yield
+        finally:
+            self._obstacles = None
+
+    @contextmanager
+    def deferred_arrows(self):
+        """Pendant le bloc, les flèches touchées ne sont pas recalculées à chaque mouvement de leurs
+        extrémités, mais une seule fois à la fin, avec les positions définitives."""
+        if self._pending_arrows is not None:          # déjà dans un lot : il recalculera à la fin
+            yield
+            return
+        self._pending_arrows = {}
+        try:
+            yield
+        finally:
+            pending, self._pending_arrows = self._pending_arrows, None
+            with self._frozen_obstacles():
+                for a in pending:
+                    if a.scene() is self:
+                        a.update_path()
 
     def snap_point(self, p):
         g = self.grid_size
@@ -172,7 +215,8 @@ class DiagramScene(LayersMixin, QGraphicsScene):
         groups = [g for g in self.nodes() if isinstance(g, GroupItem) and g.fit]
         groups.sort(key=_depth, reverse=True)       # les plus imbriqués d'abord
         for g in groups:
-            g.refit()
+            with self.deferred_arrows():              # groupe et enfants déplacés : flèches recalculées
+                g.refit()                             # une fois, avant d'ajuster le groupe parent
 
     def after_move(self):
         self.update_membership(self.top_selected_nodes())
@@ -709,6 +753,10 @@ class DiagramScene(LayersMixin, QGraphicsScene):
             self._set_hover(hover)
             e.accept()
             return
+        if isinstance(self.mouseGrabberItem(), NodeItem):
+            with self.deferred_arrows():      # plusieurs éléments déplacés : chaque flèche tracée une fois
+                super().mouseMoveEvent(e)
+            return
         super().mouseMoveEvent(e)
 
     def mouseReleaseEvent(self, e):
@@ -884,7 +932,8 @@ class DiagramScene(LayersMixin, QGraphicsScene):
         from . import items as _items
         old_fb, _items._FONT_FALLBACK[0] = _items._FONT_FALLBACK[0], self.font_size  # textes mesurés à la taille du diagramme
         try:
-            return self._from_dict(data, offset, new_ids, external)
+            with self.deferred_arrows():              # chaque flèche tracée une fois, tout étant en place
+                return self._from_dict(data, offset, new_ids, external)
         finally:
             _items._FONT_FALLBACK[0] = old_fb
 
@@ -924,7 +973,7 @@ class DiagramScene(LayersMixin, QGraphicsScene):
             dst = self._ep_from(d["dst"], mapping, offset, ext)
             if src is None or dst is None:
                 continue
-            a = ArrowItem(src, dst, d.get("style", "straight"))
+            a = ArrowItem(src, dst, d.get("style", "straight"), trace=False)   # tracée une fois ajoutée
             for k in ArrowItem.SAVE:
                 if k in d:
                     setattr(a, k, d[k])
@@ -946,13 +995,16 @@ class DiagramScene(LayersMixin, QGraphicsScene):
         return json.dumps(self.to_dict(), sort_keys=True)
 
     def current_state(self):
+        """Jeton de l'état actuel (comparé à celui de la dernière sauvegarde)."""
         return self._undo[self._undo_i]
 
     def reroute(self):
-        """Les flèches automatiques contournent les blocs : à recalculer quand un bloc bouge."""
-        for a in self.arrows():
-            if a.style == "auto":
-                a.update_path()
+        """Les flèches automatiques contournent les blocs : à recalculer quand un bloc bouge
+        (chaque flèche ne refait son tracé que si ses extrémités ou les blocs proches ont bougé)."""
+        with self._frozen_obstacles():
+            for a in self.arrows():
+                if a.style == "auto":
+                    a.update_path()
 
     def checkpoint(self):
         if self._temp is not None:
@@ -960,7 +1012,7 @@ class DiagramScene(LayersMixin, QGraphicsScene):
         if not (QApplication.mouseButtons() & Qt.LeftButton and self.mouseGrabberItem() is not None):
             self.refit_groups()
             self.reroute()
-        s = self.state()
+        s = zlib.compress(self.state().encode("utf-8"), 1)   # historique compressé : ~15× moins de mémoire
         if self._undo_i >= 0 and self._undo[self._undo_i] == s:
             return
         del self._undo[self._undo_i + 1:]
@@ -993,7 +1045,7 @@ class DiagramScene(LayersMixin, QGraphicsScene):
         self._hover = None
         self.clear()
         self._guides, self._guide_cache = [], None
-        data = json.loads(s)
+        data = json.loads(zlib.decompress(s))
         self._apply_settings(data)
         self._apply_layers_data(data)
         self._loading = True
@@ -1015,15 +1067,16 @@ class DiagramScene(LayersMixin, QGraphicsScene):
         self._apply_settings(data)
         self.current_layer = None
         self._apply_layers_data(data)
-        self._loading = True
-        try:
-            self.from_dict(data)
-        finally:
-            self._loading = False
-        if self.fit_text:                 # fichier écrit à la main / par un LLM : blocs à la bonne taille
-            for n in self.nodes():
-                if isinstance(n, BlockItem):
-                    n.fit_to_text()
+        with self.deferred_arrows():      # flèches tracées une fois, blocs à leur taille définitive
+            self._loading = True
+            try:
+                self.from_dict(data)
+            finally:
+                self._loading = False
+            if self.fit_text:             # fichier écrit à la main / par un LLM : blocs à la bonne taille
+                for n in self.nodes():
+                    if isinstance(n, BlockItem):
+                        n.fit_to_text()
         self.layersChanged.emit()
         self._undo, self._undo_i = [], -1
         self.checkpoint()

@@ -126,10 +126,6 @@ class LayersMixin:
                 self._linfo[L["id"]] = (i, vis, locked, op, L["id"] in act)
         return self._linfo
 
-    def editable(self, lid):
-        i = self._info().get(lid)
-        return bool(i and i[1] and not i[2] and i[4])
-
     # -------------------------------------------------- application aux éléments
     def top_of(self, it):
         while it.parentItem() is not None:

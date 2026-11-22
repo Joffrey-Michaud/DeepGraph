@@ -7,13 +7,14 @@ from PyQt5.QtGui import QPen, QColor, QPainter, QPainterPath, QPainterPathStroke
 from PyQt5.QtWidgets import QGraphicsItem
 
 from .config import CFG
-from .items import SEL_COLOR, BlockItem, OperatorItem, global_width, ink, is_exporting, skip_paint
-from .routing import route
+from .items import SEL_COLOR, global_width, ink, is_exporting, skip_paint
+from .routing import nearby, route
 
 STYLES = [("straight", "Droite"), ("ortho1", "1 angle"), ("ortho2", "2 angles"),
           ("auto", "Automatique (contourne les blocs)"), ("free", "Coudes libres")]
 FIRSTS = [("auto", "Auto"), ("v", "Vertical d'abord"), ("h", "Horizontal d'abord")]
 HEADS = [("end", "À la fin"), ("start", "Au début"), ("both", "Aux deux bouts"), ("none", "Aucune")]
+_MISSING = object()
 
 
 # ----------------------------------------------------------------- géométrie
@@ -29,21 +30,24 @@ def _unit(a, b):
 
 
 def simplify(pts):
+    """Retire les points confondus et ceux alignés avec leurs voisins (calculs sur des flottants)."""
     out = []
+    hypot = math.hypot
     for p in pts:
-        if out and _len(out[-1], p) < 0.01:
+        x, y = p.x(), p.y()
+        if out and hypot(x - out[-1][0], y - out[-1][1]) < 0.01:
             continue
-        out.append(QPointF(p))
+        out.append((x, y))
     i = 1
     while i < len(out) - 1:
-        a, b, c = out[i - 1], out[i], out[i + 1]
-        cross = (b.x() - a.x()) * (c.y() - b.y()) - (b.y() - a.y()) * (c.x() - b.x())
-        dot = (b.x() - a.x()) * (c.x() - b.x()) + (b.y() - a.y()) * (c.y() - b.y())
-        if abs(cross) <= 1e-3 * max(1.0, _len(a, b) * _len(b, c)) and dot >= 0:
+        (ax, ay), (bx, by), (cx, cy) = out[i - 1], out[i], out[i + 1]
+        cross = (bx - ax) * (cy - by) - (by - ay) * (cx - bx)
+        dot = (bx - ax) * (cx - bx) + (by - ay) * (cy - by)
+        if abs(cross) <= 1e-3 * max(1.0, hypot(bx - ax, by - ay) * hypot(cx - bx, cy - by)) and dot >= 0:
             out.pop(i)
         else:
             i += 1
-    return out
+    return [QPointF(x, y) for x, y in out]
 
 
 def rounded_path(pts, radius):
@@ -166,7 +170,8 @@ class ArrowItem(QGraphicsItem):
     ]
     MARGIN = 10.0
 
-    def __init__(self, src, dst, style="straight"):
+    def __init__(self, src, dst, style="straight", trace=True):
+        """trace=False : tracé calculé plus tard (ajout à la scène pendant un chargement)."""
         super().__init__()
         st = CFG.style
         self.uid = None
@@ -182,13 +187,16 @@ class ArrowItem(QGraphicsItem):
         self.layer = None
         self._raw, self._pts, self._heads = [], [], []
         self._path = QPainterPath()
+        self._geom_key = None                      # entrées de update_path pour le tracé actuel
+        self._bcache = None                        # (épaisseur, boundingRect)
         self._drag = None
         self._last = None
         self.setFlag(QGraphicsItem.ItemIsSelectable, True)
         self.setZValue(10)
         self.setAcceptHoverEvents(True)
         self.attach()
-        self.update_path()
+        if trace:
+            self.update_path()
 
     def eff_width(self):
         return float(self.width) if self.width is not None else global_width(self, "arrow_width")
@@ -259,15 +267,22 @@ class ArrowItem(QGraphicsItem):
         if sc is None:
             return None
         d1, d2 = self.src.direction(), self.dst.direction()
-        rects = []
-        for n in sc.nodes():
-            if not isinstance(n, (BlockItem, OperatorItem)) or not n.isVisible():
-                continue
-            if (n is self.src.node and d1 is None) or (n is self.dst.node and d2 is None):
-                continue                           # ancré au centre : on part de l'intérieur
-            rects.append(n.scene_frame())
+        skip1 = self.src.node if d1 is None else None   # ancré au centre : on part de l'intérieur
+        skip2 = self.dst.node if d2 is None else None
+        rects = [r for n, r in sc.route_obstacles() if n is not skip1 and n is not skip2]
         margin = max(10.0, 2 * float(sc.grid_size))
-        return route(p1, d1, p2, d2, rects, margin)
+        x1, y1, x2, y2 = p1.x(), p1.y(), p2.x(), p2.y()
+        near = nearby(rects, x1, y1, x2, y2)
+        # le tracé ne dépend que des extrémités et des obstacles proches : inutile de le recalculer
+        # quand rien de tout cela n'a bougé (à chaque action, à chaque annulation dans un grand schéma)
+        key = (x1, y1, d1, x2, y2, d2, margin, tuple(near))
+        cache = sc.route_cache
+        pts = cache.get(key, _MISSING)
+        if pts is _MISSING:
+            if len(cache) >= 4000:          # borne la mémoire (quelques Mo au plus)
+                cache.clear()
+            pts = cache[key] = route(p1, d1, p2, d2, near, margin)
+        return None if pts is None else [QPointF(p) for p in pts]
 
     def compute_points(self):
         p1, p2 = self.src.pos(), self.dst.pos()
@@ -300,13 +315,25 @@ class ArrowItem(QGraphicsItem):
         return QPolygonF([tip, base + perp * (width / 2), base - perp * (width / 2)])
 
     def update_path(self):
-        self.prepareGeometryChange()
+        sc = self.scene()
+        pending = getattr(sc, "_pending_arrows", None)
+        if pending is not None:            # lot en cours (chargement, ajustement d'un groupe…)
+            pending[self] = None           # recalculée une seule fois, à la fin du lot
+            return
         st = CFG.style
         raw = self.compute_points()
+        eff_w = self.eff_width()
+        key = (tuple((p.x(), p.y()) for p in raw), self.head, eff_w, st["arrow_width"],
+               st["arrow_head_length"], st["arrow_head_width"], st["arrow_corner_radius"])
+        if key == self._geom_key:          # même tracé : seulement redessiner (couleur, pointillés…)
+            self.update()
+            return
+        self.prepareGeometryChange()
+        self._geom_key, self._bcache = key, None
         pts = simplify(raw)
         self._raw, self._pts = raw, pts
         base_w = float(st["arrow_width"]) or 1.0
-        k = math.sqrt(max(self.eff_width(), 0.1) / base_w)
+        k = math.sqrt(max(eff_w, 0.1) / base_w)
         hl, hw = float(st["arrow_head_length"]) * k, float(st["arrow_head_width"]) * k
         hs, he = heads_split(self.head)
         line = [QPointF(p) for p in pts]
@@ -340,11 +367,15 @@ class ArrowItem(QGraphicsItem):
         return r.adjusted(-m, -m, m, m)
 
     def boundingRect(self):
-        r = self.content_rect()
-        for p in self._raw:
-            r = r.united(QRectF(p.x() - 1, p.y() - 1, 2, 2))
-        m = self.MARGIN + self.eff_width()
-        return r.adjusted(-m, -m, m, m)
+        w = self.eff_width()
+        c = self._bcache
+        if c is None or c[0] != w:
+            r = self.content_rect()
+            for p in self._raw:
+                r = r.united(QRectF(p.x() - 1, p.y() - 1, 2, 2))
+            m = self.MARGIN + w
+            c = self._bcache = (w, r.adjusted(-m, -m, m, m))
+        return QRectF(c[1])
 
     def handle_points(self):
         if len(self._raw) < 2:

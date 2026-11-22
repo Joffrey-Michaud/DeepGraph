@@ -734,10 +734,6 @@ class TextItem(NodeItem):
         """Taille effective du texte (px) : la sienne, ou la taille globale du diagramme."""
         return int(self.font_size) if self.font_size is not None else global_font_size(self)
 
-    def _flags(self):
-        h = {"left": Qt.AlignLeft, "right": Qt.AlignRight}.get(self.align, Qt.AlignHCenter)
-        return int(h | Qt.AlignVCenter)
-
     def on_props_changed(self):
         tw, th = richtext.measure(self.text or " ", self.text_size(), self.bold, self.italic)
         self.w = tw + 2 * self.PAD

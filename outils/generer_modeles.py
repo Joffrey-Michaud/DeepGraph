@@ -220,7 +220,7 @@ def build_vgg16(d):
     W, DY = 140, 40
     y = 0
     inp = d.blk("Image 224×224×3", 0, y, IO, w=W)
-    prev, last = inp, inp
+    last = inp
     y += DY + 6
     stages = [(64, 2, "224×224"), (128, 2, "112×112"), (256, 3, "56×56"), (512, 3, "28×28"), (512, 3, "14×14")]
     for k, (ch, reps, size) in enumerate(stages, 1):

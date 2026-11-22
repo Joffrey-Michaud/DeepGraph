@@ -64,18 +64,24 @@ class DiagramView(QGraphicsView):
 
     @staticmethod
     def _dots(painter, rect, step, color, size, skip=None):
-        left = math.floor(rect.left() / step) * step
-        top = math.floor(rect.top() / step) * step
-        pts = []
-        x = left
-        while x <= rect.right():
-            onx = skip is not None and abs(x / skip - round(x / skip)) < 1e-6
-            y = top
-            while y <= rect.bottom():
-                if not (onx and abs(y / skip - round(y / skip)) < 1e-6):
-                    pts.append(QPointF(x, y))
-                y += step
-            x += step
+        def coords(start, end):           # mêmes additions successives que le tracé d'origine
+            out, v = [], math.floor(start / step) * step
+            while v <= end:
+                out.append(v)
+                v += step
+            return out
+
+        def on_skip(v):                    # sur la grille principale (dessinée à part)
+            return abs(v / skip - round(v / skip)) < 1e-6
+
+        xs, ys = coords(rect.left(), rect.right()), coords(rect.top(), rect.bottom())
+        if skip is None:
+            pts = [QPointF(x, y) for x in xs for y in ys]
+        else:
+            ys_off = [y for y in ys if not on_skip(y)]
+            pts = []
+            for x in xs:
+                pts += [QPointF(x, y) for y in (ys_off if on_skip(x) else ys)]
         pen = QPen(color, size)
         pen.setCosmetic(True)
         pen.setCapStyle(Qt.RoundCap)

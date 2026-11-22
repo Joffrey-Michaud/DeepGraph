@@ -302,7 +302,7 @@ def _install_git(release, log):
         return False, ("Clone git avec des modifications non enregistrées (commit / stash) :\n"
                        f"{st['dirty']}\n\nRien n'a été touché. Une fois le dossier propre : "
                        "git pull --ff-only origin main.")
-    log(f"git fetch --tags origin …")
+    log("git fetch --tags origin …")
     p = _git("fetch", "--tags", "origin", timeout=120)
     if p.returncode != 0:
         return False, "git fetch a échoué :\n" + (p.stderr or p.stdout).strip()
